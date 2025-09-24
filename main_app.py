@@ -10,9 +10,9 @@ from pykrx.stock import get_market_ticker_list, get_market_ticker_name
 import pymysql
 DB_CONFIG = {
     'host': os.environ.get('DB_HOST', '127.0.0.1'),
-    'user': os.environ.get('DB_USER', 'root'), # 예시 값. 실제 값으로 변경
-    'password': os.environ.get('DB_PASSWORD', '1234'), # 예시 값. 실제 값으로 변경
-    'database': os.environ.get('DB_NAME', 'my_stock'), # 예시 값. 실제 값으로 변경
+    'user': os.environ.get('DB_USER', 'root'),
+    'password': os.environ.get('DB_PASSWORD', '1234'),
+    'database': os.environ.get('DB_NAME', 'my_stock'),
     'charset': 'utf8mb4'
 }
 
