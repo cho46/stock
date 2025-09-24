@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>회원가입</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            text-align: center;
+            font-weight: 300;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .register {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid #e1e8ed;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #34495e;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="password"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ecf0f1;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: #fafbfc;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group input[type="password"]:focus {
+            outline: none;
+            border-color: #3498db;
+            background: white;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.2);
+        }
+
+        .email-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .email-group input {
+            flex: 1;
+        }
+
+        .email-group span {
+            color: #34495e;
+            font-weight: bold;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+            color: #34495e;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .submit-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .error {
+            color: #e74c3c;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+
+        .success {
+            color: #27ae60;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+
+        .form-group.error input {
+            border-color: #e74c3c;
+        }
+
+        .form-group.success input {
+            border-color: #27ae60;
+        }
+
+        @media (max-width: 600px) {
+            .register {
+                padding: 20px;
+                margin: 10px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .email-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>어서오세요 호갱님~</h1>
+    <div class="register">
+        <form id="signupForm">
+            <div class="form-group">
+                <label for="id">아이디</label>
+                <input type="text" id="id" name="Id" placeholder="아이디를 입력하세요">
+                <div class="error" id="idError"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="pw">비밀번호</label>
+                <input type="password" id="pw" name="Pw" placeholder="비밀번호를 입력하세요">
+                <div class="error" id="pwError"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="pwCheck">비밀번호 확인</label>
+                <input type="password" id="pwCheck" name="PwCheck" placeholder="비밀번호를 다시 입력하세요">
+                <div class="error" id="pwCheckError"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="name">이름</label>
+                <input type="text" id="name" name="Name" placeholder="이름을 입력하세요">
+                <div class="error" id="nameError"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="hp">전화번호</label>
+                <input type="text" id="hp" name="HP" placeholder="010-0000-0000">
+                <div class="error" id="hpError"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="age">나이</label>
+                <input type="text" id="age" name="Age" placeholder="나이를 입력하세요">
+                <div class="error" id="ageError"></div>
+            </div>
+            <div class="form-group">
+                <label for="gender">성별</label>
+                <input type="text" id="gender" name="gender" placeholder="성별을 입력하세요">
+                <div class="error" id="genderError"></div>
+            </div>
+            <div class="form-group">
+                <label>이메일</label>
+                <div class="email-group">
+                    <input type="text" id="email1" name="Email_1" placeholder="이메일">
+                    <span>@</span>
+                    <input type="text" id="email2" name="Email_2" placeholder="도메인">
+                </div>
+                <div class="error" id="emailError"></div>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="adult" name="adult">
+                <label for="adult">성인이 맞습니까?</label>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="privacy" name="privacy">
+                <label for="privacy">개인정보 수집에 동의합니다.</label>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submitBtn">회원가입하기</button>
+        </form>
+    </div>
+
+    <script>
+        // DOM 요소들 가져오기
+        const form = document.getElementById('signupForm');
+        const inputs = form.querySelectorAll('input[type="text"], input[type="password"]');
+        const submitBtn = document.getElementById('submitBtn');
+
+        // 실시간 유효성 검사
+        inputs.forEach(input => {
+            input.addEventListener('blur', () => validateField(input));
+            input.addEventListener('input', () => clearError(input));
+        });
+
+        // 체크박스 상태 확인
+        const adultCheck = document.getElementById('adult');
+        const privacyCheck = document.getElementById('privacy');
+
+        [adultCheck, privacyCheck].forEach(checkbox => {
+            checkbox.addEventListener('change', updateSubmitButton);
+        });
+
+        function validateField(field) {
+            const value = field.value.trim();
+            const fieldName = field.name;
+            let isValid = true;
+            let errorMsg = '';
+
+            // 각 필드별 유효성 검사
+            switch(fieldName) {
+                case 'Id':
+                    if (!value) {
+                        errorMsg = '아이디를 입력해주세요.';
+                        isValid = false;
+                    } else if (value.length < 4) {
+                        errorMsg = '아이디는 4자 이상이어야 합니다.';
+                        isValid = false;
+                    } else if (!/^[a-zA-Z0-9]+$/.test(value)) {
+                        errorMsg = '아이디는 영문자와 숫자만 사용 가능합니다.';
+                        isValid = false;
+                    }
+                    break;
+
+                case 'Pw':
+                    if (!value) {
+                        errorMsg = '비밀번호를 입력해주세요.';
+                        isValid = false;
+                    } else if (value.length < 6) {
+                        errorMsg = '비밀번호는 6자 이상이어야 합니다.';
+                        isValid = false;
+                    }
+                    // 비밀번호 확인 필드도 함께 검사
+                    const pwCheckField = document.getElementById('pwCheck');
+                    if (pwCheckField.value) {
+                        validatePasswordMatch();
+                    }
+                    break;
+
+                case 'PwCheck':
+                    validatePasswordMatch();
+                    return; // 별도 함수에서 처리하므로 return
+
+                case 'Name':
+                    if (!value) {
+                        errorMsg = '이름을 입력해주세요.';
+                        isValid = false;
+                    } else if (!/^[가-힣a-zA-Z\s]+$/.test(value)) {
+                        errorMsg = '이름은 한글 또는 영문만 입력 가능합니다.';
+                        isValid = false;
+                    }
+                    break;
+
+                case 'HP':
+                    if (!value) {
+                        errorMsg = '전화번호를 입력해주세요.';
+                        isValid = false;
+                    } else if (!/^010-\d{4}-\d{4}$/.test(value)) {
+                        errorMsg = '전화번호 형식이 올바르지 않습니다. (010-0000-0000)';
+                        isValid = false;
+                    }
+                    break;
+
+                case 'Age':
+                    const age = parseInt(value);
+                    if (!value) {
+                        errorMsg = '나이를 입력해주세요.';
+                        isValid = false;
+                    } else if (isNaN(age) || age < 1 || age > 120) {
+                        errorMsg = '올바른 나이를 입력해주세요. (1-120)';
+                        isValid = false;
+                    }
+                    break;
+                case 'gender':
+                    if(!value){
+                    errorMsg= '성별을 입력해주세요';
+                    isValid = false;
+                    }
+                    break;
+                case 'Email_1':
+                case 'Email_2':
+                    validateEmail();
+                    return; // 별도 함수에서 처리하므로 return
+            }
+
+            showFieldResult(field, isValid, errorMsg);
+        }
+
+        function validatePasswordMatch() {
+            const pw = document.getElementById('pw').value;
+            const pwCheck = document.getElementById('pwCheck').value;
+            const pwCheckField = document.getElementById('pwCheck');
+
+            if (!pwCheck) {
+                showFieldResult(pwCheckField, false, '비밀번호 확인을 입력해주세요.');
+            } else if (pw !== pwCheck) {
+                showFieldResult(pwCheckField, false, '비밀번호가 일치하지 않습니다.');
+            } else {
+                showFieldResult(pwCheckField, true, '');
+            }
+        }
+
+        function validateEmail() {
+            const email1 = document.getElementById('email1').value.trim();
+            const email2 = document.getElementById('email2').value.trim();
+            const email1Field = document.getElementById('email1');
+
+            if (!email1) {
+                showEmailResult(false, '이메일을 입력해주세요.');
+            } else if (!email2) {
+                showEmailResult(false, '도메인을 입력해주세요.');
+            } else if (!/^[a-zA-Z0-9._-]+$/.test(email1)) {
+                showEmailResult(false, '올바른 이메일 형식이 아닙니다.');
+            } else if (!/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email2)) {
+                showEmailResult(false, '올바른 도메인 형식이 아닙니다.');
+            } else {
+                showEmailResult(true, '');
+            }
+        }
+
+        function showFieldResult(field, isValid, message) {
+            const formGroup = field.closest('.form-group');
+            const errorDiv = formGroup.querySelector('.error');
+
+            formGroup.classList.remove('error', 'success');
+
+            if (isValid) {
+                formGroup.classList.add('success');
+                errorDiv.textContent = '';
+            } else {
+                formGroup.classList.add('error');
+                errorDiv.textContent = message;
+            }
+
+            updateSubmitButton();
+        }
+
+        function showEmailResult(isValid, message) {
+            const email1Field = document.getElementById('email1');
+            const formGroup = email1Field.closest('.form-group');
+            const errorDiv = formGroup.querySelector('.error');
+
+            formGroup.classList.remove('error', 'success');
+
+            if (isValid) {
+                formGroup.classList.add('success');
+                errorDiv.textContent = '';
+            } else {
+                formGroup.classList.add('error');
+                errorDiv.textContent = message;
+            }
+
+            updateSubmitButton();
+        }
+
+        function clearError(field) {
+            const formGroup = field.closest('.form-group');
+            formGroup.classList.remove('error');
+        }
+
+        function updateSubmitButton() {
+            const allValid = form.querySelectorAll('.form-group.success').length === 6;
+            const adultsChecked = adultCheck.checked;
+            const privacyChecked = privacyCheck.checked;
+
+            submitBtn.disabled = !(allValid && adultsChecked && privacyChecked);
+        }
+
+        // 전화번호 자동 포맷팅
+        document.getElementById('hp').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length >= 3) {
+                if (value.length <= 7) {
+                    value = value.replace(/(\d{3})(\d+)/, '$1-$2');
+                } else {
+                    value = value.replace(/(\d{3})(\d{4})(\d+)/, '$1-$2-$3');
+                }
+            }
+            e.target.value = value.substring(0, 13); // 010-0000-0000 길이 제한
+        });
+
+        // 폼 제출 처리
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            // 모든 필드 유효성 검사
+            inputs.forEach(input => validateField(input));
+
+            // 체크박스 확인
+            if (!adultCheck.checked) {
+                alert('성인 인증이 필요합니다.');
+                return;
+            }
+
+            if (!privacyCheck.checked) {
+                alert('개인정보 수집에 동의해주세요.');
+                return;
+            }
+
+            // 모든 조건이 충족되면 성공 메시지
+            if (!submitBtn.disabled) {
+                alert('회원가입이 완료되었습니다!');
+                // 실제로는 서버로 데이터를 전송하는 코드가 들어갑니다.
+                // form.submit();
+            }
+        });
+
+        // 초기 상태 설정
+        updateSubmitButton();
+    </script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>상세 차트 (Plotly)</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; }
+        .container { width: 100%; height: 100%; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; }
+        #chartDiv { flex-grow: 1; }
+        .toolbar { margin-bottom: 10px; display: flex; gap: 10px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: all 0.3s ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #fff; border: 1px solid #e1e5e9; }
+        .btn:hover { background: #e9ecef; }
+        .btn.active { background: #28a745; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <button id="drawTrendLineBtn" class="btn"><i class="fas fa-pencil-alt"></i> 추세선 그리기</button>
+            <button id="clearLinesBtn" class="btn"><i class="fas fa-trash"></i> 추세선 지우기</button>
+        </div>
+        <div id="chartDiv"></div>
+    </div>
+
+    <script>
+        const chartDiv = document.getElementById('chartDiv');
+        const chartData = JSON.parse(localStorage.getItem('chartData'));
+
+        if (chartData) {
+            const candlestickTrace = {
+                x: chartData.dates,
+                open: chartData.open,
+                high: chartData.high,
+                low: chartData.low,
+                close: chartData.close,
+                type: 'candlestick',
+                name: '주가',
+                xaxis: 'x',
+                yaxis: 'y1'
+            };
+
+            const portfolioTrace = {
+                x: chartData.dates,
+                y: chartData.portfolio,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'AI 전략',
+                line: { color: '#667eea' },
+                xaxis: 'x',
+                yaxis: 'y2'
+            };
+
+            const benchmarkTrace = {
+                x: chartData.dates,
+                y: chartData.benchmark,
+                type: 'scatter',
+                mode: 'lines',
+                name: '매수 후 보유 (B&H)',
+                line: { color: '#f5a623' },
+                xaxis: 'x',
+                yaxis: 'y2'
+            };
+            
+            const priceTrace = {
+                x: chartData.dates,
+                y: chartData.close,
+                type: 'scatter',
+                mode: 'lines',
+                name: '종가',
+                line: { color: '#000000', dash: 'dot' },
+                xaxis: 'x',
+                yaxis: 'y3'
+            };
+
+            const layout = {
+                title: '상세 분석 차트',
+                xaxis: { domain: [0, 1], anchor: 'y2', rangeslider: { visible: false } },
+                yaxis: { domain: [0.3, 1], title: '주가 (Candlestick)' },
+                yaxis2: { domain: [0, 0.25], title: '포트폴리오 가치' },
+                yaxis3: { domain: [0, 0.25], title: '종가', overlaying: 'y2', side: 'right' },
+                shapes: [],
+                annotations: [], // Add annotations array to layout
+                dragmode: 'zoom'
+            };
+
+            // Add trade annotations
+            if (chartData.trades && chartData.trades.length > 0) {
+                chartData.trades.forEach(trade => {
+                    layout.annotations.push({
+                        x: trade.date,
+                        y: trade.price,
+                        xref: 'x',
+                        yref: 'y1', // Annotate on the candlestick chart
+                        text: trade.type === 'buy' ? 'AI 구매' : 'AI 판매',
+                        showarrow: false,
+                        font: {
+                            color: trade.type === 'buy' ? 'green' : 'red',
+                            size: 12 // Smaller font size for text
+                        },
+                        xanchor: 'center',
+                        yanchor: trade.type === 'buy' ? 'bottom' : 'top' // Position text above/below point
+                    });
+                });
+            }
+
+            const data = [candlestickTrace, portfolioTrace, benchmarkTrace, priceTrace];
+
+            Plotly.newPlot('chartDiv', data, layout);
+
+            // 추세선 그리기 로직 (드래그 방식)
+            let isDrawing = false;
+            let startPoint = null;
+            let tempLine = null;
+            const drawBtn = document.getElementById('drawTrendLineBtn');
+            const clearBtn = document.getElementById('clearLinesBtn');
+
+            drawBtn.addEventListener('click', () => {
+                isDrawing = !isDrawing;
+                drawBtn.classList.toggle('active', isDrawing);
+                Plotly.relayout('chartDiv', { dragmode: isDrawing ? 'crosshair' : 'zoom' });
+            });
+            
+            clearBtn.addEventListener('click', () => {
+                layout.shapes = [];
+                Plotly.relayout('chartDiv', { shapes: layout.shapes });
+            });
+
+            chartDiv.on('plotly_mousedown', (data) => {
+                if (!isDrawing) return;
+                const point = data.points[0];
+                startPoint = { x: point.x, y: point.y };
+                tempLine = {
+                    type: 'line',
+                    x0: startPoint.x, y0: startPoint.y,
+                    x1: startPoint.x, y1: startPoint.y,
+                    line: { color: 'rgba(0,0,255,0.5)', width: 2, dash: 'dot' }
+                };
+                layout.shapes.push(tempLine);
+            });
+
+            chartDiv.addEventListener('mousemove', (e) => {
+                if (!isDrawing || !startPoint) return;
+                
+                const rect = chartDiv.getBoundingClientRect();
+                const xPixel = e.clientX - rect.left;
+                const yPixel = e.clientY - rect.top;
+                
+                const xaxis = chartDiv._fullLayout.xaxis;
+                const yaxis = chartDiv._fullLayout.yaxis;
+                
+                const xData = xaxis.p2c.inverse(xPixel);
+                const yData = yaxis.p2c.inverse(yPixel);
+
+                tempLine.x1 = xData;
+                tempLine.y1 = yData;
+                Plotly.relayout('chartDiv', { shapes: layout.shapes });
+            });
+
+            chartDiv.on('plotly_mouseup', () => {
+                if (!isDrawing || !startPoint) return;
+                if (tempLine) {
+                    tempLine.line.dash = 'solid';
+                    tempLine.line.color = 'blue';
+                }
+                Plotly.relayout('chartDiv', { shapes: layout.shapes });
+                startPoint = null;
+                tempLine = null;
+            });
+
+        } else {
+            chartDiv.innerHTML = '<p>차트 데이터를 불러올 수 없습니다. 메인 페이지로 돌아가서 분석을 다시 실행해주세요.</p>';
+        }
+    </script>
+</body>
+</html>
