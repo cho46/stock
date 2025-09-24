@@ -392,44 +392,44 @@
         }
 
         // 로그인 폼 제출 이벤트
-        loginForm.addEventListener('submit', async function(e) {
+        loginForm.addEventListener('submit', function(e) {
             e.preventDefault();
 
             if (!validateForm()) {
                 return;
             }
 
-            const userId = userIdInput.value.trim();
-            const userPw = userPwInput.value.trim();
+            const formData = new FormData(loginForm);
 
             // 로딩 상태 시작
             loginBtn.classList.add('loading');
             loginBtn.disabled = true;
             homeBtn.disabled = true;
 
-            try {
-                await processLogin(userId, userPw);
-
-                // 로그인 성공
-                alert('로그인 성공! 환영합니다.');
-
-                // 로그인 상태 유지 체크박스 확인
-                if (rememberMe.checked) {
-                    // 실제로는 쿠키나 localStorage에 저장
-                    console.log('로그인 상태 유지 설정됨');
+            fetch('/login', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                // 백엔드에서 리디렉션 응답을 보냈다면 (로그인 성공 시), 해당 주소로 이동
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else {
+                    // 리디렉션이 없다면 (로그인 실패), 페이지를 새로고침하여
+                    // 서버가 보낸 flash 메시지를 표시
+                    window.location.reload();
                 }
-
-                // 실제로는 메인 페이지로 리다이렉트
-                // window.location.href = '/dashboard';
-
-            } catch (error) {
-                showError(error);
-            } finally {
-                // 로딩 상태 종료
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showError('로그인 중 오류가 발생했습니다.');
+            })
+            .finally(() => {
+                // 로딩 상태 종료 (finally 블록은 성공/실패 여부와 관계없이 항상 실행)
                 loginBtn.classList.remove('loading');
                 loginBtn.disabled = false;
                 homeBtn.disabled = false;
-            }
+            });
         });
 
         // 홈 버튼 클릭 이벤트

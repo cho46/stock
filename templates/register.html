@@ -53,7 +53,8 @@
         }
 
         .form-group input[type="text"],
-        .form-group input[type="password"] {
+        .form-group input[type="password"],
+        .form-group select {
             width: 100%;
             padding: 12px 15px;
             border: 2px solid #ecf0f1;
@@ -64,7 +65,8 @@
         }
 
         .form-group input[type="text"]:focus,
-        .form-group input[type="password"]:focus {
+        .form-group input[type="password"]:focus,
+        .form-group select:focus {
             outline: none;
             border-color: #3498db;
             background: white;
@@ -78,7 +80,7 @@
             gap: 10px;
         }
 
-        .email-group input {
+        .email-group input, .email-group select {
             flex: 1;
         }
 
@@ -145,11 +147,13 @@
             margin-top: 5px;
         }
 
-        .form-group.error input {
+        .form-group.error input,
+        .form-group.error select {
             border-color: #e74c3c;
         }
 
-        .form-group.success input {
+        .form-group.success input,
+        .form-group.success select {
             border-color: #27ae60;
         }
 
@@ -171,7 +175,7 @@
     </style>
 </head>
 <body>
-    <h1>어서오세요 호갱님~</h1>
+    <h1>안녕하세요!</h1>
     <div class="register">
         <form id="signupForm">
             <div class="form-group">
@@ -211,7 +215,12 @@
             </div>
             <div class="form-group">
                 <label for="gender">성별</label>
-                <input type="text" id="gender" name="gender" placeholder="성별을 입력하세요">
+                <select id="gender" name="gender">
+                    <option value="">선택하세요</option>
+                    <option value="male">남성</option>
+                    <option value="female">여성</option>
+                    <option value="none">선택 안함</option>
+                </select>
                 <div class="error" id="genderError"></div>
             </div>
             <div class="form-group">
@@ -219,14 +228,20 @@
                 <div class="email-group">
                     <input type="text" id="email1" name="Email_1" placeholder="이메일">
                     <span>@</span>
-                    <input type="text" id="email2" name="Email_2" placeholder="도메인">
+                    <select id="email_domain_select" style="flex: 0.8;">
+                        <option value="naver.com">naver.com</option>
+                        <option value="gmail.com">gmail.com</option>
+                        <option value="daum.net">daum.net</option>
+                        <option value="custom">직접 입력</option>
+                    </select>
+                    <input type="text" id="email2" name="Email_2" placeholder="도메인" style="flex: 1; display: none;">
                 </div>
                 <div class="error" id="emailError"></div>
             </div>
 
             <div class="checkbox-group">
-                <input type="checkbox" id="adult" name="adult">
-                <label for="adult">성인이 맞습니까?</label>
+                <input type="checkbox" id="isadult_checkbox" name="isadult_checkbox">
+                <label for="isadult_checkbox">성인이 맞습니까?</label>
             </div>
 
             <div class="checkbox-group">
@@ -241,7 +256,7 @@
     <script>
         // DOM 요소들 가져오기
         const form = document.getElementById('signupForm');
-        const inputs = form.querySelectorAll('input[type="text"], input[type="password"]');
+        const inputs = form.querySelectorAll('input[type="text"], input[type="password"], select');
         const submitBtn = document.getElementById('submitBtn');
 
         // 실시간 유효성 검사
@@ -251,7 +266,7 @@
         });
 
         // 체크박스 상태 확인
-        const adultCheck = document.getElementById('adult');
+        const adultCheck = document.getElementById('isadult_checkbox');
         const privacyCheck = document.getElementById('privacy');
 
         [adultCheck, privacyCheck].forEach(checkbox => {
@@ -287,7 +302,6 @@
                         errorMsg = '비밀번호는 6자 이상이어야 합니다.';
                         isValid = false;
                     }
-                    // 비밀번호 확인 필드도 함께 검사
                     const pwCheckField = document.getElementById('pwCheck');
                     if (pwCheckField.value) {
                         validatePasswordMatch();
@@ -296,7 +310,7 @@
 
                 case 'PwCheck':
                     validatePasswordMatch();
-                    return; // 별도 함수에서 처리하므로 return
+                    return;
 
                 case 'Name':
                     if (!value) {
@@ -330,14 +344,14 @@
                     break;
                 case 'gender':
                     if(!value){
-                    errorMsg= '성별을 입력해주세요';
-                    isValid = false;
+                        errorMsg= '성별을 선택해주세요';
+                        isValid = false;
                     }
                     break;
                 case 'Email_1':
                 case 'Email_2':
                     validateEmail();
-                    return; // 별도 함수에서 처리하므로 return
+                    return;
             }
 
             showFieldResult(field, isValid, errorMsg);
@@ -416,7 +430,7 @@
         }
 
         function updateSubmitButton() {
-            const allValid = form.querySelectorAll('.form-group.success').length === 6;
+            const allValid = form.querySelectorAll('.form-group.success').length === 8;
             const adultsChecked = adultCheck.checked;
             const privacyChecked = privacyCheck.checked;
 
@@ -433,33 +447,69 @@
                     value = value.replace(/(\d{3})(\d{4})(\d+)/, '$1-$2-$3');
                 }
             }
-            e.target.value = value.substring(0, 13); // 010-0000-0000 길이 제한
+            e.target.value = value.substring(0, 13);
         });
 
         // 폼 제출 처리
         form.addEventListener('submit', function(e) {
             e.preventDefault();
 
-            // 모든 필드 유효성 검사
-            inputs.forEach(input => validateField(input));
+            let isFormValid = true;
+            inputs.forEach(input => {
+                validateField(input);
+            });
+            validatePasswordMatch();
+            validateEmail();
 
-            // 체크박스 확인
-            if (!adultCheck.checked) {
-                alert('성인 인증이 필요합니다.');
-                return;
+            if (form.querySelectorAll('.form-group.error').length > 0) {
+                isFormValid = false;
             }
 
-            if (!privacyCheck.checked) {
+            const privacyChecked = document.getElementById('privacy').checked;
+            if (!privacyChecked) {
                 alert('개인정보 수집에 동의해주세요.');
-                return;
+                isFormValid = false;
             }
 
-            // 모든 조건이 충족되면 성공 메시지
-            if (!submitBtn.disabled) {
-                alert('회원가입이 완료되었습니다!');
-                // 실제로는 서버로 데이터를 전송하는 코드가 들어갑니다.
-                // form.submit();
+            if (isFormValid && !submitBtn.disabled) {
+                const formData = new FormData(form);
+
+                fetch('/register', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (response.redirected) {
+                        window.location.href = response.url;
+                    } else {
+                        window.location.reload();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('회원가입 중 오류가 발생했습니다.');
+                });
             }
+        });
+
+        // 도메인 선택 로직
+        const domainSelect = document.getElementById('email_domain_select');
+        const domainInput = document.getElementById('email2');
+
+        domainInput.value = domainSelect.value;
+
+        domainSelect.addEventListener('change', function() {
+            if (this.value === 'custom') {
+                domainInput.value = '';
+                domainInput.style.display = 'block';
+                domainSelect.style.flex = '0.5';
+                domainInput.focus();
+            } else {
+                domainInput.style.display = 'none';
+                domainSelect.style.flex = '0.8';
+                domainInput.value = this.value;
+            }
+            validateEmail();
         });
 
         // 초기 상태 설정

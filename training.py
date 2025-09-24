@@ -55,7 +55,7 @@ def run_training_process(symbol, period):
         model.learn(total_timesteps=30000)
 
         yield json.dumps({"status": "progress", "message": "모델 및 스케일러 저장 중..."}) + '\n'
-        models_dir = "models"
+        models_dir = "models" # 모델 저장 경로 수정요망 models/사용자명/사용자가 만든 모델파일
         os.makedirs(models_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_filename = f"{symbol}_ppo_{timestamp}.zip"

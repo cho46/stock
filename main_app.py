@@ -1,130 +1,163 @@
-
-from flask import Flask, request, jsonify, render_template, Response, stream_with_context
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 import os
-import logging
-import traceback
-import secrets
-import json
-import pkg_resources
-from pykrx.stock import get_market_ticker_list, get_market_ticker_name
-import pymysql
-DB_CONFIG = {
-    'host': os.environ.get('DB_HOST', '127.0.0.1'),
-    'user': os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', '1234'),
-    'database': os.environ.get('DB_NAME', 'my_stock'),
-    'charset': 'utf8mb4'
-}
+import glob
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
 
-# 분리된 모듈 임포트
-from analysis import StockAnalyzer
-from training import run_training_process
-
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
+# 1. Flask 앱 및 기본 설정
 app = Flask(__name__)
-app.secret_key = secrets.token_urlsafe(16)
+app.config['SECRET_KEY'] = 'your_very_secret_key'  # 실제 서비스에서는 복잡한 키로 변경하세요.
 
-# 전역 분석기 인스턴스
-analyzer = StockAnalyzer()
+# 2. 데이터베이스 설정 (MySQL)
+# 'mysql+pymysql://[사용자명]:[비밀번호]@[DB호스트]:[포트]/[DB이름]' 형식으로 작성하세요.
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# 3. Flask-Login 설정
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = '/login'  # 로그인하지 않은 사용자가 접근 시 리디렉션할 뷰
+
+# 4. 사용자 모델 정의 (UserMixin 상속)
+class UsersInfo(UserMixin, db.Model):
+    __tablename__ = 'users_info'
+    users_seq = db.Column(db.Integer, autoincrement=True, index=True)
+    user_id = db.Column(db.String(50), primary_key=True, unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    hp = db.Column(db.String(13), nullable=False)
+    age = db.Column(db.Integer, nullable=False, default=0)
+    email = db.Column(db.String(100), nullable=False)
+    isadult = db.Column(db.String(5), nullable=False, default='False')
+
+    # Flask-Login이 사용자를 식별하기 위해 사용하는 메서드
+    def get_id(self):
+        return self.user_id
+
+# 5. 사용자 로더 함수
+@login_manager.user_loader
+def load_user(user_id):
+    return UsersInfo.query.get(user_id)
+
+import os
+import glob
+from flask import jsonify
+
+# --- 라우트(Routes) 정의 ---
+
+@app.route('/models')
+def get_models():
+    models_path = os.path.join(os.path.dirname(__file__), 'models')
+    model_files = [os.path.basename(f) for f in glob.glob(os.path.join(models_path, '*.zip'))]
+    return jsonify(model_files)
 
 @app.route('/')
 def index():
-    """메인 페이지 렌더링"""
     return render_template('index.html')
 
-@app.route('/models', methods=['GET'])
-def get_models():
-    """'models' 디렉토리에 있는 모델 파일 목록을 반환합니다."""
-    models_dir = 'models'
-    try:
-        if not os.path.exists(models_dir):
-            os.makedirs(models_dir)
-        
-        models = [f for f in os.listdir(models_dir) if f.endswith('.zip')]
-        return jsonify(models)
-    except Exception as e:
-        logger.error(f"모델 목록을 가져오는 중 오류: {e}")
-        return jsonify({'error': '모델 목록을 가져올 수 없습니다.'}), 500
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        user_id = request.form.get('Id')
+        password = request.form.get('Pw')
+        name = request.form.get('Name')
+        hp = request.form.get('HP')
+        age = request.form.get('Age')
+        email1 = request.form.get('Email_1')
+        email2 = request.form.get('Email_2')
+        email = f"{email1}@{email2}" if email1 and email2 else ""
+        is_adult_checked = 'True' if request.form.get('isadult_checkbox') else 'False'
 
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    """주식 분석 요청을 처리합니다."""
-    try:
-        data = request.get_json()
-        symbol = data.get('symbol', '').upper().strip()
-        model_name = data.get('model_name')
+        if UsersInfo.query.get(user_id):
+            flash('이미 존재하는 아이디입니다.')
+            return redirect(url_for('register'))
 
-        if not symbol or not model_name:
-            return jsonify({'error': '종목 코드와 모델을 모두 선택해주세요.'}), 400
+        hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        if not analyzer.load_model(model_name):
-            return jsonify({'error': f'{model_name} 모델을 로드할 수 없습니다.'}), 500
-
-        result = analyzer.analyze_stock(
-            symbol=symbol,
-            period=data.get('period', '6mo'),
-            initial_balance=float(data.get('initial_balance', 10000))
+        new_user = UsersInfo(
+            user_id=user_id,
+            password=hashed_password,
+            name=name,
+            hp=hp,
+            age=int(age) if age else 0,
+            email=email,
+            isadult=is_adult_checked
         )
-        
-        if 'error' in result:
-            return jsonify(result), 500
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"분석 API 오류: {e}")
-        traceback.print_exc()
-        return jsonify({'error': f'서버 오류가 발생했습니다: {str(e)}'}), 500
 
-@app.route('/train', methods=['POST'])
-def train_model():
-    """모델 훈련을 시작하고 진행 상황을 스트리밍합니다."""
-    try:
-        data = request.get_json()
-        symbol = data.get('symbol', '').upper().strip()
-        period = data.get('period', '1y')
+        db.session.add(new_user)
+        db.session.commit()
 
-        if not symbol:
-            return jsonify({'error': '훈련할 종목 코드를 입력해주세요.'}), 400
+        flash('회원가입이 완료되었습니다. 로그인해주세요.')
+        return redirect(url_for('login'))
 
-        # 스트리밍 응답을 위해 제너레이터 함수를 사용
-        return Response(stream_with_context(run_training_process(symbol, period)), content_type='application/json')
+    return render_template('register.html')
 
-    except Exception as e:
-        logger.error(f"훈련 API 오류: {e}")
-        traceback.print_exc()
-        return jsonify({'error': f'훈련 중 서버 오류가 발생했습니다: {str(e)}'}), 500
-
-@app.route('/search_korean_stock')
-def search_korean_stock():
-    query = request.args.get('query', '').upper()
-    if not query:
-        return jsonify([])
-
-    all_tickers = []
-    for market in ["KOSPI", "KOSDAQ"]:
-        tickers = get_market_ticker_list(market=market)
-        for ticker in tickers:
-            all_tickers.append({"ticker": ticker, "name": get_market_ticker_name(ticker)})
-
-    results = [stock for stock in all_tickers if query in stock['name'].upper() or query in stock['ticker']]
-    return jsonify(results[:10]) # Return top 10 results
-
-@app.route('/chart')
-def chart():
-    """상세 차트 페이지 렌더링"""
-    return render_template('chart.html')
-@app.route('/login')
+@app.route('/login', methods=['GET','POST'])
 def login():
+    if request.method == 'POST':
+        user_id = request.form.get('Id')
+        password = request.form.get('Pw')
+        
+        user = UsersInfo.query.get(user_id)
+
+        # 디버깅 코드 2: 로그인 시도 정보 출력
+        print(f"\n[DEBUG] Login attempt for user_id: {user_id}")
+        if user:
+            print(f"[DEBUG] User found in DB: {user.user_id}")
+            print(f"[DEBUG] Stored hash in DB: {user.password}")
+            print(f"[DEBUG] Password from form: {password}")
+            is_match = check_password_hash(user.password, password)
+            print(f"[DEBUG] Hash check result: {is_match}")
+        else:
+            print("[DEBUG] User not found in DB.")
+
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('아이디 또는 비밀번호가 올바르지 않습니다.')
+            return render_template('login.html')
 
     return render_template('login.html')
 
-@app.route('/register')
-def register():
-    return render_template('register.html')
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('로그아웃되었습니다.')
+    return redirect(url_for('index'))
+
+@app.route('/profile')
+@login_required
+def profile():
+    return f'안녕하세요, {current_user.name}님!'
+
+class UserLogs(db.Model):
+    __tablename__ = 'user_logs'
+    visit_Seq = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), nullable=False)
+    address = db.Column(db.Text, nullable=False)
+    time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+@app.after_request
+def log_user_visit(response):
+    if current_user.is_authenticated:
+        if request.endpoint and 'static' not in request.endpoint:
+            new_log = UserLogs(
+                user_id=current_user.get_id(),
+                address=request.path,
+                time = datetime.now()
+            )
+            db.session.add(new_log)
+            db.session.commit()
+    return response
+
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)

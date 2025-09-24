@@ -517,19 +517,23 @@
             </div>
 
             <div class="user-menu">
+                {% if current_user.is_authenticated %}
+                <!-- Logged in -->
+                <div class="user-profile" id="userProfile">
+                    <a href="{{ url_for('profile') }}" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px;">
+                        <div class="status-indicator online"></div>
+                        <div class="avatar">{{ current_user.name[0] }}</div>
+                        <span>안녕하세요, {{ current_user.name }}님</span>
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="login-btn">로그아웃</a>
+                </div>
+                {% else %}
                 <!-- Not logged in -->
                 <div id="authButtons">
-                    <a href="login" class="login-btn" onclick="showLoginModal()">로그인</a>
-                    <a href="register" class="signup-btn" onclick="showSignupModal()">회원가입</a>
+                    <a href="{{ url_for('login') }}" class="login-btn">로그인</a>
+                    <a href="{{ url_for('register') }}" class="signup-btn">회원가입</a>
                 </div>
-
-                <!-- Logged in (hidden by default) -->
-                <div class="user-profile" id="userProfile">
-                    <div class="status-indicator online"></div>
-                    <div class="avatar">JD</div>
-                    <span id="userName">John Doe</span>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+                {% endif %}
             </div>
         </nav>
     </div>
