@@ -16,7 +16,7 @@ from utils import download_stock_data, add_technical_indicators
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-def run_training_process(symbol, period):
+def run_training_process(symbol, period, user_id, model_name):
     """모델 훈련을 실행하고 진행 상황을 JSON 문자열로 yield합니다."""
     try:
         yield json.dumps({"status": "progress", "message": f"{symbol} 데이터 다운로드 중..."}) + '\n'

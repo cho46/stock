@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response, stream_with_context
+from training import run_training_process
+from analysis import StockAnalyzer
 import os
 import glob
 from flask_sqlalchemy import SQLAlchemy
@@ -8,10 +10,9 @@ from datetime import datetime
 
 # 1. Flask 앱 및 기본 설정
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_very_secret_key'  # 실제 서비스에서는 복잡한 키로 변경하세요.
+app.config['SECRET_KEY'] = 'your_very_secret_key'
 
 # 2. 데이터베이스 설정 (MySQL)
-# 'mysql+pymysql://[사용자명]:[비밀번호]@[DB호스트]:[포트]/[DB이름]' 형식으로 작성하세요.
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -20,9 +21,9 @@ db = SQLAlchemy(app)
 # 3. Flask-Login 설정
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = '/login'  # 로그인하지 않은 사용자가 접근 시 리디렉션할 뷰
+login_manager.login_view = '/login'
 
-# 4. 사용자 모델 정의 (UserMixin 상속)
+# 4. 사용자 모델 정의
 class UsersInfo(UserMixin, db.Model):
     __tablename__ = 'users_info'
     users_seq = db.Column(db.Integer, autoincrement=True, index=True)
@@ -34,7 +35,6 @@ class UsersInfo(UserMixin, db.Model):
     email = db.Column(db.String(100), nullable=False)
     isadult = db.Column(db.String(5), nullable=False, default='False')
 
-    # Flask-Login이 사용자를 식별하기 위해 사용하는 메서드
     def get_id(self):
         return self.user_id
 
@@ -43,16 +43,71 @@ class UsersInfo(UserMixin, db.Model):
 def load_user(user_id):
     return UsersInfo.query.get(user_id)
 
-import os
-import glob
-from flask import jsonify
-
 # --- 라우트(Routes) 정의 ---
 
+@app.route('/train', methods=['POST'])
+@login_required
+def train_model_route():
+    data = request.get_json()
+    symbol = data.get('symbol')
+    period = data.get('period')
+    model_name = data.get('model_name')
+    user_id = current_user.get_id()
+
+    if not all([symbol, period, model_name, user_id]):
+        return jsonify({"status": "error", "message": "모든 필드를 채워주세요."}), 400
+
+    return Response(stream_with_context(run_training_process(symbol, period, user_id, model_name)), content_type='application/json')
+
+@app.route('/analyze', methods=['POST'])
+@login_required
+def analyze_stock_route():
+    data = request.get_json()
+    model_name = data.get('model_name')
+    symbol = data.get('symbol')
+    user_id = current_user.get_id()
+
+    if not all([model_name, symbol, user_id]):
+        return jsonify({"error": "모델, 종목코드 정보가 필요합니다."}), 400
+
+    analyzer = StockAnalyzer()
+    if not analyzer.load_model(model_name, user_id):
+        return jsonify({"error": "모델을 불러오는 데 실패했습니다."}), 500
+    
+    result = analyzer.analyze_stock(
+        symbol=symbol, 
+        period=data.get('period', '1y'), 
+        initial_balance=float(data.get('initial_balance', 10000))
+    )
+    
+    if 'error' in result:
+        return jsonify(result), 500
+
+    return jsonify(result)
+
+@app.route('/search_korean_stock')
+def search_stock_route():
+    # This is a placeholder. You might need a real implementation.
+    # from utils import search_korean_stock 
+    # query = request.args.get('query', '')
+    # results = search_korean_stock(query)
+    # return jsonify(results)
+    return jsonify([{"ticker": "005930", "name": "삼성전자"}, {"ticker": "000660", "name": "SK하이닉스"}])
+
+@app.route('/chart')
+def chart_page():
+    return render_template('chart.html')
+
 @app.route('/models')
+@login_required
 def get_models():
-    models_path = os.path.join(os.path.dirname(__file__), 'models')
-    model_files = [os.path.basename(f) for f in glob.glob(os.path.join(models_path, '*.zip'))]
+    user_id = current_user.get_id()
+    user_models_path = os.path.join(os.path.dirname(__file__), 'models', user_id)
+    
+    if not os.path.exists(user_models_path):
+        return jsonify([])
+
+    model_files = [os.path.basename(f) for f in glob.glob(os.path.join(user_models_path, '*.zip'))]
     return jsonify(model_files)
 
 @app.route('/')
@@ -101,19 +156,7 @@ def login():
     if request.method == 'POST':
         user_id = request.form.get('Id')
         password = request.form.get('Pw')
-        
         user = UsersInfo.query.get(user_id)
-
-        # 디버깅 코드 2: 로그인 시도 정보 출력
-        print(f"\n[DEBUG] Login attempt for user_id: {user_id}")
-        if user:
-            print(f"[DEBUG] User found in DB: {user.user_id}")
-            print(f"[DEBUG] Stored hash in DB: {user.password}")
-            print(f"[DEBUG] Password from form: {password}")
-            is_match = check_password_hash(user.password, password)
-            print(f"[DEBUG] Hash check result: {is_match}")
-        else:
-            print("[DEBUG] User not found in DB.")
 
         if user and check_password_hash(user.password, password):
             login_user(user)
@@ -150,12 +193,10 @@ def log_user_visit(response):
             new_log = UserLogs(
                 user_id=current_user.get_id(),
                 address=request.path,
-                time = datetime.now()
             )
             db.session.add(new_log)
             db.session.commit()
     return response
-
 
 if __name__ == '__main__':
     with app.app_context():

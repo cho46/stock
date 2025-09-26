@@ -136,12 +136,13 @@ class StockAnalyzer:
         self.model = None
         self.scaler = None
 
-    def load_model(self, model_name: str):
+    def load_model(self, model_name: str, user_id: str):
         """선택된 모델과 스케일러를 로드합니다."""
         try:
-            model_path = os.path.join(self.models_dir, model_name)
+            user_models_path = os.path.join(self.models_dir, user_id)
+            model_path = os.path.join(user_models_path, model_name)
             scaler_name = model_name.replace('.zip', '_scaler.pkl')
-            scaler_path = os.path.join(self.models_dir, scaler_name)
+            scaler_path = os.path.join(user_models_path, scaler_name)
 
             if os.path.exists(model_path):
                 self.model = PPO.load(model_path)
