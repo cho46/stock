@@ -138,6 +138,16 @@
             <h1 class="title">차트 분석 도구</h1>
             <div class="toolbar">
                 <div class="tool-group">
+                    <button id="toggleAIBtn" class="btn active" title="AI 분석 표시/숨기기"><i class="fas fa-robot"></i> AI 분석</button>
+                </div>
+                <div class="tool-group">
+                    <button class="btn range-btn" data-range="1m">1M</button>
+                    <button class="btn range-btn" data-range="3m">3M</button>
+                    <button class="btn range-btn" data-range="6m">6M</button>
+                    <button class="btn range-btn" data-range="1y">1Y</button>
+                    <button class="btn range-btn active" data-range="all">All</button>
+                </div>
+                <div class="tool-group">
                     <button id="magnetBtn" class="btn magnet active" title="자석 기능 (캔들에 자동 붙기)">
                         <i class="fas fa-magnet"></i> 자석
                     </button>
@@ -182,173 +192,268 @@
     <div class="magnet-indicator" id="magnetIndicator"></div>
 
     <script>
-        // 샘플 데이터 생성
-        function generateSampleData() {
-            const dates = [];
-            const open = [], high = [], low = [], close = [];
-            const portfolio = [], benchmark = [];
-
-            let basePrice = 100 + Math.random() * 20;
-            let portfolioValue = 100;
-            let benchmarkValue = 100;
-            const today = new Date();
-
-            for (let i = 199; i >= 0; i--) {
-                const date = new Date(today);
-                date.setDate(date.getDate() - i);
-                dates.push(date.toISOString().split('T')[0]);
-
-                const change = (Math.random() - 0.48) * 6; // Slightly positive bias
-                const openPrice = basePrice;
-                const closePrice = basePrice + change;
-                const highPrice = Math.max(openPrice, closePrice) + Math.random() * 3;
-                const lowPrice = Math.min(openPrice, closePrice) - Math.random() * 3;
-
-                open.push(openPrice);
-                high.push(highPrice);
-                low.push(lowPrice);
-                close.push(closePrice);
-
-                basePrice = closePrice > 0 ? closePrice : 1;
-
-                const aiReturn = change * (1 + Math.random() * 0.3);
-                const bhReturn = change;
-
-                portfolioValue *= (1 + aiReturn / 100);
-                benchmarkValue *= (1 + bhReturn / 100);
-
-                portfolio.push(portfolioValue);
-                benchmark.push(benchmarkValue);
-            }
-
-            return { dates, open, high, low, close, portfolio, benchmark };
-        }
-
         const chartDiv = document.getElementById('chartDiv');
-        const chartData = generateSampleData();
+        const toolButtons = document.querySelectorAll('.tool-btn');
 
-        // 차트 데이터 설정
-        const candlestickTrace = {
-            x: chartData.dates,
-            open: chartData.open,
-            high: chartData.high,
-            low: chartData.low,
-            close: chartData.close,
-            type: 'candlestick',
-            name: '주가',
-            xaxis: 'x',
-            yaxis: 'y1'
-        };
-
-        const portfolioTrace = {
-            x: chartData.dates,
-            y: chartData.portfolio,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'AI 전략',
-            line: { color: '#667eea', width: 2 },
-            xaxis: 'x',
-            yaxis: 'y2'
-        };
-
-        const benchmarkTrace = {
-            x: chartData.dates,
-            y: chartData.benchmark,
-            type: 'scatter',
-            mode: 'lines',
-            name: '벤치마크',
-            line: { color: '#f5a623', width: 2 },
-            xaxis: 'x',
-            yaxis: 'y2'
-        };
-
-        const layout = {
-            title: {
-                text: '차트분석',
-                font: { size: 20, color: '#2c3e50' }
-            },
-            xaxis: {
-                domain: [0, 1],
-                anchor: 'y2',
-                rangeslider: { visible: false },
-                showgrid: true,
-                gridcolor: 'rgba(0,0,0,0.1)'
-            },
-            yaxis: {
-                domain: [0.3, 1],
-                title: '주가',
-                showgrid: true,
-                gridcolor: 'rgba(0,0,0,0.1)'
-            },
-            yaxis2: {
-                domain: [0, 0.25],
-                title: '포트폴리오 가치',
-                showgrid: true,
-                gridcolor: 'rgba(0,0,0,0.1)'
-            },
-            shapes: [],
-            annotations: [],
-            dragmode: 'pan',
-            plot_bgcolor: 'rgba(255,255,255,0.9)',
-            paper_bgcolor: 'rgba(255,255,255,0.9)',
-            margin: { t: 50, b: 50, l: 60, r: 60 }
-        };
-
-        const data = [candlestickTrace, portfolioTrace, benchmarkTrace];
-
-        Plotly.newPlot('chartDiv', data, layout, {
-            responsive: true,
-            displayModeBar: true,
-            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d']
-        });
-
-        // --- 분석 도구 및 자석 기능 시스템 ---
+        let layout = {};
+        let chartData = {};
+        let data = [];
+        
+        let isAIVisible = true;
         let magnetEnabled = true;
         let currentTool = null;
         let drawingIdCounter = 0;
         let relayoutTimeout = null;
 
-        const magnetBtn = document.getElementById('magnetBtn');
-        const toolButtons = document.querySelectorAll('.tool-btn');
-        const undoBtn = document.getElementById('undoBtn');
-        const clearBtn = document.getElementById('clearBtn');
-        const statusElement = document.getElementById('tool-status');
-        const coordinatesElement = document.getElementById('coordinates');
-
         const fiboLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
         const fiboExtLevels = [1, 1.236, 1.382, 1.5, 1.618, 2, 2.618];
         const fiboColors = ['#787878', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3', '#FF7F00', '#FFD700'];
 
-        magnetBtn.addEventListener('click', () => {
-            magnetEnabled = !magnetEnabled;
-            magnetBtn.classList.toggle('active', magnetEnabled);
+        async function initializeChart(symbol, modelName) {
+            const statusElement = document.getElementById('tool-status');
+            statusElement.textContent = `'${symbol}'에 대한 AI 분석 데이터를 불러오는 중입니다...`;
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbol: symbol,
+                        model_name: modelName,
+                        period: '2y',
+                        initial_balance: 10000
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP 오류! 상태: ${response.status}`);
+                }
+
+                const analysisResult = await response.json();
+                if (analysisResult.error) throw new Error(analysisResult.error);
+
+                chartData = analysisResult.chart_data;
+                drawChart(analysisResult);
+
+            } catch (error) {
+                console.error('차트 초기화 오류:', error);
+                chartDiv.innerHTML = `<p style="padding: 20px; color: red;">차트 데이터를 불러오는 데 실패했습니다: ${error.message}</p>`;
+            }
+        }
+
+        function drawChart(analysisResult) {
+            const candlestickTrace = {
+                x: chartData.dates, open: chartData.open, high: chartData.high, low: chartData.low, close: chartData.close,
+                type: 'candlestick', name: '주가', xaxis: 'x', yaxis: 'y1'
+            };
+            const portfolioTrace = {
+                x: chartData.dates, y: chartData.portfolio, type: 'scatter', mode: 'lines', name: 'AI 전략',
+                line: { color: '#667eea', width: 2 }, xaxis: 'x', yaxis: 'y2'
+            };
+            const benchmarkTrace = {
+                x: chartData.dates, y: chartData.benchmark, type: 'scatter', mode: 'lines', name: '벤치마크',
+                line: { color: '#f5a623', width: 2 }, xaxis: 'x', yaxis: 'y2'
+            };
+
+            layout = {
+                title: { text: `${analysisResult.symbol} 상세 분석`, font: { size: 20, color: '#2c3e50' } },
+                xaxis: { domain: [0, 1], anchor: 'y2', rangeslider: { visible: false }, showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
+                yaxis: { domain: [0.3, 1], title: '주가', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
+                yaxis2: { domain: [0, 0.25], title: '포트폴리오 가치', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
+                shapes: [], annotations: [], dragmode: 'pan',
+                plot_bgcolor: 'rgba(255,255,255,0.9)', paper_bgcolor: 'rgba(255,255,255,0.9)',
+                margin: { t: 50, b: 50, l: 60, r: 60 }
+            };
+            
+            if(chartData.trades) {
+                chartData.trades.forEach(trade => {
+                    layout.annotations.push({
+                        name: 'trade_marker', // Name for easy identification
+                        x: trade.date, y: trade.price, xref: 'x', yref: 'y1', showarrow: true, arrowhead: trade.type === 'buy' ? 6 : 5, ax: 0, ay: trade.type === 'buy' ? -25 : 25,
+                        bordercolor: trade.type === 'buy' ? '#27ae60' : '#c0392b', bgcolor: trade.type === 'buy' ? 'rgba(46, 204, 113, 0.7)' : 'rgba(231, 76, 60, 0.7)',
+                        text: trade.type === 'buy' ? 'B' : 'S', font: {color: 'white'}
+                    });
+                });
+            }
+
+            data = [candlestickTrace, portfolioTrace, benchmarkTrace];
+            Plotly.newPlot('chartDiv', data, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
+            attachEventListeners();
             updateStatus();
-        });
+        }
+
+        function attachEventListeners() {
+            const magnetBtn = document.getElementById('magnetBtn');
+            const undoBtn = document.getElementById('undoBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const toggleAIBtn = document.getElementById('toggleAIBtn');
+            const rangeButtons = document.querySelectorAll('.range-btn');
+
+            magnetBtn.addEventListener('click', () => {
+                magnetEnabled = !magnetEnabled;
+                magnetBtn.classList.toggle('active', magnetEnabled);
+                updateStatus();
+            });
+
+            toggleAIBtn.addEventListener('click', () => {
+                isAIVisible = !isAIVisible;
+                toggleAIBtn.classList.toggle('active', isAIVisible);
+                
+                // Toggle traces (AI portfolio and benchmark are at index 1 and 2)
+                Plotly.restyle('chartDiv', { visible: isAIVisible }, [1, 2]);
+
+                // Toggle trade annotations
+                const annotationUpdates = {};
+                layout.annotations.forEach((ann, i) => {
+                    if (ann.name === 'trade_marker') {
+                        annotationUpdates[`annotations[${i}].visible`] = isAIVisible;
+                    }
+                });
+                if(Object.keys(annotationUpdates).length > 0) {
+                    Plotly.relayout('chartDiv', annotationUpdates);
+                }
+            });
+
+            rangeButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    rangeButtons.forEach(b => b.classList.remove('active'));
+                    e.currentTarget.classList.add('active');
+                    const range = e.currentTarget.dataset.range;
+                    const endDate = new Date(chartData.dates[chartData.dates.length - 1]);
+                    let startDate = new Date(chartData.dates[0]);
+                    if (range !== 'all') {
+                        startDate = new Date(endDate);
+                        if (range === '1m') startDate.setMonth(startDate.getMonth() - 1);
+                        else if (range === '3m') startDate.setMonth(startDate.getMonth() - 3);
+                        else if (range === '6m') startDate.setMonth(startDate.getMonth() - 6);
+                        else if (range === '1y') startDate.setFullYear(startDate.getFullYear() - 1);
+                    }
+                    Plotly.relayout('chartDiv', {
+                        'xaxis.range': [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
+                    });
+                });
+            });
+
+            toolButtons.forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.id.split('-').slice(1).join('-'))));
+            
+            clearBtn.addEventListener('click', () => {
+                layout.shapes = layout.shapes.filter(s => s.drawing_id === undefined);
+                layout.annotations = layout.annotations.filter(a => a.drawing_id === undefined && a.name !== 'trade_marker');
+                Plotly.react('chartDiv', data, layout);
+            });
+
+            undoBtn.addEventListener('click', () => {
+                const lastDrawingIdNum = Math.max(0, ...layout.shapes.map(s => parseInt(s.drawing_id?.split('-')[1] || 0)), ...layout.annotations.map(a => a.drawing_id?.split('-')[1] || 0));
+                if (lastDrawingIdNum > 0) {
+                    const drawingId = `drawing-${lastDrawingIdNum}`;
+                    layout.shapes = layout.shapes.filter(s => s.drawing_id !== drawingId);
+                    layout.annotations = layout.annotations.filter(a => a.drawing_id !== drawingId);
+                } else {
+                    if (layout.shapes.length > 0) layout.shapes.pop();
+                    else if (layout.annotations.length > 0) layout.annotations.pop();
+                }
+                Plotly.react('chartDiv', data, layout);
+            });
+
+            chartDiv.on('plotly_relayout', (eventData) => {
+                clearTimeout(relayoutTimeout);
+                const isShapeEdit = Object.keys(eventData).some(k => k.startsWith('shapes['));
+
+                if (currentTool) { // New shape creation
+                    const lastShape = layout.shapes[layout.shapes.length - 1];
+                    if (!lastShape) return;
+                    const drawingId = `drawing-${drawingIdCounter++}`;
+                    if (magnetEnabled) {
+                        const snappedStart = findNearestCandlePoint(lastShape.x0, lastShape.y0);
+                        const snappedEnd = findNearestCandlePoint(lastShape.x1, lastShape.y1);
+                        lastShape.x0 = snappedStart.x; lastShape.y0 = snappedStart.y;
+                        lastShape.x1 = snappedEnd.x; lastShape.y1 = snappedEnd.y;
+                    }
+                    lastShape.drawing_id = drawingId;
+                    lastShape.editable = true;
+                    switch(currentTool) {
+                        case 'trendline': lastShape.name = 'trendline'; lastShape.line = { color: '#0066cc', width: 2 }; break;
+                        case 'horizontal': lastShape.name = 'horizontal'; lastShape.y1 = lastShape.y0; lastShape.line = { color: '#ff6b6b', width: 2 }; break;
+                        case 'vertical': lastShape.name = 'vertical'; lastShape.x1 = lastShape.x0; lastShape.line = { color: '#4ecdc4', width: 2 }; break;
+                        case 'rectangle': lastShape.name = 'rectangle'; lastShape.line = { color: '#45b7d1', width: 2 }; lastShape.fillcolor = 'rgba(69, 183, 209, 0.1)'; break;
+                        case 'fibonacci': case 'fibonacci-ext':
+                            lastShape.name = currentTool === 'fibonacci' ? 'fib_bg' : 'fib_ext_bg';
+                            lastShape.fillcolor = 'rgba(102, 126, 234, 0.1)';
+                            lastShape.line = { width: 0 };
+                            createFibonacci(lastShape, drawingId, currentTool === 'fibonacci-ext');
+                            break;
+                    }
+                    setActiveTool(currentTool);
+                    Plotly.react('chartDiv', data, layout);
+                } else if (isShapeEdit) { // Existing shape edited
+                    relayoutTimeout = setTimeout(() => {
+                        const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
+                        if (!shapeKey) return;
+                        const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
+                        const editedShape = layout.shapes[shapeIndex];
+                        if (editedShape && editedShape.editable) {
+                            if (magnetEnabled) {
+                                const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
+                                const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
+                                editedShape.x0 = snappedStart.x; editedShape.y0 = snappedStart.y;
+                                editedShape.x1 = snappedEnd.x; editedShape.y1 = snappedEnd.y;
+                            }
+                            if (editedShape.name === 'fib_bg' || editedShape.name === 'fib_ext_bg') {
+                                layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === editedShape.name);
+                                layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
+                                createFibonacci(editedShape, editedShape.drawing_id, editedShape.name === 'fib_ext_bg');
+                            }
+                            Plotly.react('chartDiv', data, layout);
+                        }
+                    }, 150);
+                }
+            });
+
+            chartDiv.on('plotly_hover', (e) => {
+                const point = e.points[0];
+                const priceText = point.close !== undefined ? `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}` : (point.y !== undefined ? point.y.toFixed(2) : '');
+                coordinatesElement.innerHTML = `<strong>날짜:</strong> ${point.x} | <strong>가격:</strong> ${priceText}`;
+            });
+            chartDiv.on('plotly_unhover', () => { coordinatesElement.innerHTML = '마우스를 차트에 올려보세요'; });
+            chartDiv.on('plotly_click', (e) => {
+                if (currentTool === 'text' && e.points.length > 0) {
+                    let point = e.points[0];
+                    if (magnetEnabled) {
+                        const snapped = findNearestCandlePoint(point.x, point.y);
+                        if (snapped.snapped) point = { x: snapped.x, y: snapped.y };
+                    }
+                    const text = prompt('추가할 텍스트를 입력하세요:', '분석 메모');
+                    if (text) {
+                        const drawingId = `drawing-${drawingIdCounter++}`;
+                        layout.annotations.push({ x: point.x, y: point.y, text: text, showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: 2, arrowcolor: '#667eea', font: { size: 12, color: '#2c3e50' }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: '#667eea', borderwidth: 2, borderpad: 4, name: 'text_annotation', drawing_id: drawingId, editable: true });
+                        setActiveTool(currentTool);
+                        Plotly.react('chartDiv', data, layout);
+                    }
+                }
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'z') { e.preventDefault(); undoBtn.click(); }
+                    if (e.key === 'm') { e.preventDefault(); magnetBtn.click(); }
+                }
+                if (e.key === 'Escape') setActiveTool(null);
+            });
+            window.addEventListener('resize', () => Plotly.Plots.resize(chartDiv));
+        }
 
         function findNearestCandlePoint(x, y) {
-            if (!chartData || chartData.dates.length === 0) return { x, y, snapped: false };
-            let closestDateIndex = 0;
-            let minDistance = Infinity;
+            if (!magnetEnabled || !chartData.dates) return { x, y, snapped: false };
+            let closestDateIndex = 0, minDistance = Infinity;
             chartData.dates.forEach((date, index) => {
                 const distance = Math.abs(new Date(x).getTime() - new Date(date).getTime());
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestDateIndex = index;
-                }
+                if (distance < minDistance) { minDistance = distance; closestDateIndex = index; }
             });
-
             const ohlcPrices = [chartData.open[closestDateIndex], chartData.high[closestDateIndex], chartData.low[closestDateIndex], chartData.close[closestDateIndex]];
-            let closestPrice = ohlcPrices[0];
-            let minPriceDistance = Math.abs(closestPrice - y);
-
+            let closestPrice = ohlcPrices[0], minPriceDistance = Math.abs(closestPrice - y);
             ohlcPrices.forEach(price => {
                 const distance = Math.abs(price - y);
-                if (distance < minPriceDistance) {
-                    minPriceDistance = distance;
-                    closestPrice = price;
-                }
+                if (distance < minPriceDistance) { minPriceDistance = distance; closestPrice = price; }
             });
-
             return { x: chartData.dates[closestDateIndex], y: closestPrice, snapped: true };
         }
 
@@ -364,182 +469,31 @@
         }
 
         function updateStatus() {
+            const statusElement = document.getElementById('tool-status');
             const magnetStatus = magnetEnabled ? ' (🧲 자석 ON)' : ' (자석 OFF)';
             const messages = { null: '도구를 선택하여 분석을 시작하세요' + magnetStatus, 'trendline': '두 점을 클릭하여 추세선을 그으세요' + magnetStatus, 'horizontal': '수평선을 그을 위치를 클릭하세요' + magnetStatus, 'vertical': '수직선을 그을 위치를 클릭하세요' + magnetStatus, 'fibonacci': '드래그하여 피보나치 되돌림 영역을 설정하세요' + magnetStatus, 'fibonacci-ext': '드래그하여 피보나치 확장 영역을 설정하세요' + magnetStatus, 'rectangle': '드래그하여 사각형을 그으세요' + magnetStatus, 'channel': '드래그하여 채널을 설정하세요' + magnetStatus, 'text': '텍스트를 추가할 위치를 클릭하세요' + magnetStatus, 'arrow': '드래그하여 화살표를 그으세요' + magnetStatus };
             statusElement.textContent = messages[currentTool] || messages.null;
         }
 
-        toolButtons.forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.id.split('-').slice(1).join('-'))));
-        clearBtn.addEventListener('click', () => {
-            layout.shapes = [];
-            layout.annotations = [];
-            Plotly.react('chartDiv', data, layout);
-        });
-        undoBtn.addEventListener('click', () => {
-            const lastDrawingIdNum = Math.max(0, ...layout.shapes.map(s => parseInt(s.drawing_id?.split('-')[1] || 0)), ...layout.annotations.map(a => parseInt(a.drawing_id?.split('-')[1] || 0)));
-            if (lastDrawingIdNum > 0) {
-                const drawingId = `drawing-${lastDrawingIdNum}`;
-                layout.shapes = layout.shapes.filter(s => s.drawing_id !== drawingId);
-                layout.annotations = layout.annotations.filter(a => a.drawing_id !== drawingId);
-            } else {
-                if (layout.shapes.length > 0) layout.shapes.pop();
-                else if (layout.annotations.length > 0) layout.annotations.pop();
-            }
-            Plotly.react('chartDiv', data, layout);
-        });
-
-        function createFibonacciRetracement(rect, drawingId) {
+        function createFibonacci(rect, drawingId, isExtension) {
+            const levels = isExtension ? fiboExtLevels : fiboLevels;
+            const name_prefix = isExtension ? 'fib_ext' : 'fib';
             const y_start = Math.min(rect.y0, rect.y1);
             const y_end = Math.max(rect.y0, rect.y1);
             const y_diff = y_end - y_start;
             const descending = rect.y0 > rect.y1;
-
-            fiboLevels.forEach((level, i) => {
+            levels.forEach((level, i) => {
                 const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
-                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: level === 0 || level === 1 ? 'solid' : 'dot' }, name: 'fib_line', drawing_id: drawingId, editable: false });
-                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: 'fib_annotation', drawing_id: drawingId });
+                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: level === 0 || level === 1 ? 'solid' : 'dot' }, name: `${name_prefix}_line`, drawing_id: drawingId, editable: false });
+                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: `${name_prefix}_annotation`, drawing_id: drawingId });
             });
         }
 
-        function createFibonacciExtension(rect, drawingId) {
-            const y_start = Math.min(rect.y0, rect.y1);
-            const y_end = Math.max(rect.y0, rect.y1);
-            const y_diff = y_end - y_start;
-            const descending = rect.y0 > rect.y1;
-
-            fiboExtLevels.forEach((level, i) => {
-                const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
-                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: 'dash' }, name: 'fib_ext_line', drawing_id: drawingId, editable: false });
-                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: 'fib_ext_annotation', drawing_id: drawingId });
-            });
-        }
-        
-        function createChannel(rect, drawingId) {
-            const y_diff = rect.y1 - rect.y0;
-            layout.shapes.push({ type: 'line', x0: rect.x0, y0: rect.y1, x1: rect.x1, y1: rect.y1, line: { color: '#0066cc', width: 2 }, name: 'channel_top', drawing_id: drawingId, editable: true });
-            layout.shapes.push({ type: 'line', x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y0, line: { color: '#0066cc', width: 2 }, name: 'channel_bottom', drawing_id: drawingId, editable: true });
-            const mid_y = rect.y0 + y_diff / 2;
-            layout.shapes.push({ type: 'line', x0: rect.x0, y0: mid_y, x1: rect.x1, y1: mid_y, name: 'channel_mid', drawing_id: drawingId, editable: false });
-        }
-
-        chartDiv.on('plotly_relayout', (eventData) => {
-            clearTimeout(relayoutTimeout);
-
-            // Case 1: A new shape is being drawn (a tool is active)
-            if (currentTool) {
-                const lastShape = layout.shapes[layout.shapes.length - 1];
-                if (!lastShape) return;
-
-                const drawingId = `drawing-${drawingIdCounter++}`;
-
-                if (magnetEnabled) {
-                    const snappedStart = findNearestCandlePoint(lastShape.x0, lastShape.y0);
-                    const snappedEnd = findNearestCandlePoint(lastShape.x1, lastShape.y1);
-                    lastShape.x0 = snappedStart.x; lastShape.y0 = snappedStart.y;
-                    lastShape.x1 = snappedEnd.x; lastShape.y1 = snappedEnd.y;
-                }
-
-                lastShape.drawing_id = drawingId;
-                lastShape.editable = true;
-
-                switch(currentTool) {
-                    case 'trendline': lastShape.name = 'trendline'; lastShape.line = { color: '#0066cc', width: 2 }; break;
-                    case 'horizontal': lastShape.name = 'horizontal'; lastShape.y1 = lastShape.y0; lastShape.line = { color: '#ff6b6b', width: 2 }; break;
-                    case 'vertical': lastShape.name = 'vertical'; lastShape.x1 = lastShape.x0; lastShape.line = { color: '#4ecdc4', width: 2 }; break;
-                    case 'rectangle': lastShape.name = 'rectangle'; lastShape.line = { color: '#45b7d1', width: 2 }; lastShape.fillcolor = 'rgba(69, 183, 209, 0.1)'; break;
-                    case 'fibonacci':
-                        lastShape.name = 'fib_bg';
-                        lastShape.fillcolor = 'rgba(102, 126, 234, 0.1)';
-                        lastShape.line = { width: 0 };
-                        createFibonacciRetracement(lastShape, drawingId);
-                        break;
-                    case 'fibonacci-ext':
-                        lastShape.name = 'fib_ext_bg';
-                        lastShape.fillcolor = 'rgba(255, 107, 107, 0.1)';
-                        lastShape.line = { width: 0 };
-                        createFibonacciExtension(lastShape, drawingId);
-                        break;
-                    case 'channel':
-                        lastShape.name = 'channel_bg';
-                        lastShape.fillcolor = 'rgba(0, 102, 204, 0.05)';
-                        lastShape.line = { width: 0 };
-                        createChannel(lastShape, drawingId);
-                        break;
-                    case 'arrow':
-                        lastShape.name = 'arrow';
-                        lastShape.line = { color: '#e74c3c', width: 3 };
-                        layout.annotations.push({ x: lastShape.x1, y: lastShape.y1, text: '▶', showarrow: false, font: { size: 16, color: '#e74c3c' }, name: 'arrow_head', drawing_id: drawingId });
-                        break;
-                }
-                setActiveTool(currentTool); // Deactivate tool
-                Plotly.react('chartDiv', data, layout);
-
-            } 
-            // Case 2: An existing shape is being edited (no tool is active)
-            else if (Object.keys(eventData).some(k => k.startsWith('shapes['))) {
-                relayoutTimeout = setTimeout(() => {
-                    const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
-                    if (!shapeKey) return;
-                    const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
-                    const editedShape = layout.shapes[shapeIndex];
-
-                    if (editedShape && editedShape.editable) {
-                        if (magnetEnabled) {
-                            const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
-                            const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
-                            editedShape.x0 = snappedStart.x; editedShape.y0 = snappedStart.y;
-                            editedShape.x1 = snappedEnd.x; editedShape.y1 = snappedEnd.y;
-                        }
-
-                        if (editedShape.name === 'fib_bg') {
-                            layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === 'fib_bg');
-                            layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
-                            createFibonacciRetracement(editedShape, editedShape.drawing_id);
-                        }
-                        else if (editedShape.name === 'fib_ext_bg') {
-                            layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === 'fib_ext_bg');
-                            layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
-                            createFibonacciExtension(editedShape, editedShape.drawing_id);
-                        }
-                        Plotly.react('chartDiv', data, layout);
-                    }
-                }, 150); // 150ms delay for snap-on-release
-            }
+        // On page load, fetch data and initialize the chart
+        window.addEventListener('DOMContentLoaded', () => {
+            // These are temporary hardcoded values for demonstration.
+            // In a real application, you would get these from the user's selection on a previous page or URL parameters.
+            initializeChart('AAPL', 'AAPL_ppo_20250911_001207.zip');
         });
 
-        chartDiv.on('plotly_hover', (eventData) => {
-            const point = eventData.points[0];
-            const priceText = point.close !== undefined ? `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}` : (point.y !== undefined ? point.y.toFixed(2) : '');
-            coordinatesElement.innerHTML = `<strong>날짜:</strong> ${point.x} | <strong>가격:</strong> ${priceText}`;
-        });
-
-        chartDiv.on('plotly_unhover', () => { coordinatesElement.innerHTML = '마우스를 차트에 올려보세요'; });
-
-        chartDiv.on('plotly_click', (eventData) => {
-            if (currentTool === 'text' && eventData.points.length > 0) {
-                let point = eventData.points[0];
-                if (magnetEnabled) {
-                    const snapped = findNearestCandlePoint(point.x, point.y);
-                    if (snapped.snapped) point = { x: snapped.x, y: snapped.y };
-                }
-                const text = prompt('추가할 텍스트를 입력하세요:', '분석 메모');
-                if (text) {
-                    const drawingId = `drawing-${drawingIdCounter++}`;
-                    layout.annotations.push({ x: point.x, y: point.y, text: text, showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: 2, arrowcolor: '#667eea', font: { size: 12, color: '#2c3e50', family: 'Arial Black' }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: '#667eea', borderwidth: 2, borderpad: 4, name: 'text_annotation', drawing_id: drawingId, editable: true });
-                    setActiveTool(currentTool);
-                    Plotly.react('chartDiv', data, layout);
-                }
-            }
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'z') { e.preventDefault(); undoBtn.click(); }
-                if (e.key === 'm') { e.preventDefault(); magnetBtn.click(); }
-            }
-            if (e.key === 'Escape') setActiveTool(null);
-        });
-
-        updateStatus();
-        window.addEventListener('resize', () => Plotly.Plots.resize(chartDiv));
     </script>
