@@ -209,7 +209,7 @@
         const fiboExtLevels = [1, 1.236, 1.382, 1.5, 1.618, 2, 2.618];
         const fiboColors = ['#787878', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3', '#FF7F00', '#FFD700'];
 
-        async function initializeChart(symbol, modelName) {
+        async function initializeChart(symbol, modelName, period) {
             const statusElement = document.getElementById('tool-status');
             statusElement.textContent = `'${symbol}'에 대한 AI 분석 데이터를 불러오는 중입니다...`;
             try {
@@ -219,7 +219,7 @@
                     body: JSON.stringify({
                         symbol: symbol,
                         model_name: modelName,
-                        period: '2y',
+                        period: period,
                         initial_balance: 10000
                     }),
                 });
@@ -256,7 +256,7 @@
             };
 
             layout = {
-                title: { text: `${analysisResult.symbol} 상세 분석`, font: { size: 20, color: '#2c3e50' } },
+                title: { text: `${analysisResult.symbol} 상세 분석 (${analysisResult.period} 기준)`, font: { size: 20, color: '#2c3e50' } },
                 xaxis: { domain: [0, 1], anchor: 'y2', rangeslider: { visible: false }, showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
                 yaxis: { domain: [0.3, 1], title: '주가', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
                 yaxis2: { domain: [0, 0.25], title: '포트폴리오 가치', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
@@ -298,11 +298,7 @@
             toggleAIBtn.addEventListener('click', () => {
                 isAIVisible = !isAIVisible;
                 toggleAIBtn.classList.toggle('active', isAIVisible);
-                
-                // Toggle traces (AI portfolio and benchmark are at index 1 and 2)
                 Plotly.restyle('chartDiv', { visible: isAIVisible }, [1, 2]);
-
-                // Toggle trade annotations
                 const annotationUpdates = {};
                 layout.annotations.forEach((ann, i) => {
                     if (ann.name === 'trade_marker') {
@@ -489,11 +485,14 @@
             });
         }
 
-        // On page load, fetch data and initialize the chart
+        // On page load, parse URL parameters and initialize the chart
         window.addEventListener('DOMContentLoaded', () => {
-            // These are temporary hardcoded values for demonstration.
-            // In a real application, you would get these from the user's selection on a previous page or URL parameters.
-            initializeChart('AAPL', 'AAPL_ppo_20250911_001207.zip');
+            const params = new URLSearchParams(window.location.search);
+            const symbol = params.get('symbol') || 'AAPL'; // Default to AAPL if not provided
+            const modelName = params.get('model') || 'AAPL_ppo_20250911_001207.zip'; // Default model
+            const period = params.get('period') || '2y'; // Default period
+
+            initializeChart(symbol, modelName, period);
         });
 
     </script>

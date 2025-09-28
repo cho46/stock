@@ -205,13 +205,25 @@ class StockAnalyzer:
                 portfolio_history.append(env.net_worth)
                 action, _ = self.model.predict(obs, deterministic=True)
                 obs, reward, done, _, info = env.step(action)
+            
+            # 백테스트가 조기 종료된 경우에도 마지막 포트폴리오 가치를 기록
             portfolio_history.append(env.net_worth)
 
             final_balance = env.net_worth
             total_return = (final_balance - initial_balance) / initial_balance
 
+            # 원본 데이터프레임에서 분석에 사용된 부분만 잘라냄
             trade_start_idx = df_scaled.index[0]
-            chart_df = df_original[df_original.index >= trade_start_idx].iloc[:len(portfolio_history)]
+            chart_df = df_original[df_original.index >= trade_start_idx].reset_index(drop=True)
+
+            # AI 포트폴리오가 조기종료된 경우, 마지막 가치로 남은 기간을 채움
+            if len(portfolio_history) < len(chart_df):
+                last_portfolio_value = portfolio_history[-1] if portfolio_history else initial_balance
+                padding = [last_portfolio_value] * (len(chart_df) - len(portfolio_history))
+                portfolio_history.extend(padding)
+            # 만약 포트폴리오가 더 길면 차트 길이에 맞춤 (일반적으로 발생하지 않음)
+            elif len(portfolio_history) > len(chart_df):
+                portfolio_history = portfolio_history[:len(chart_df)]
 
             initial_price = chart_df['Close'].iloc[0]
             benchmark_values = (chart_df['Close'] / initial_price) * initial_balance

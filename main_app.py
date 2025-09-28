@@ -76,7 +76,7 @@ def analyze_stock_route():
     
     result = analyzer.analyze_stock(
         symbol=symbol, 
-        period=data.get('period', '1y'), 
+        period=data['period'], 
         initial_balance=float(data.get('initial_balance', 10000))
     )
     
