@@ -188,16 +188,17 @@
             const open = [], high = [], low = [], close = [];
             const portfolio = [], benchmark = [];
 
-            let basePrice = 100;
+            let basePrice = 100 + Math.random() * 20;
             let portfolioValue = 100;
             let benchmarkValue = 100;
+            const today = new Date();
 
-            for (let i = 0; i < 200; i++) {
-                const date = new Date(2023, 0, 1);
-                date.setDate(date.getDate() + i);
+            for (let i = 199; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
                 dates.push(date.toISOString().split('T')[0]);
 
-                const change = (Math.random() - 0.5) * 6;
+                const change = (Math.random() - 0.48) * 6; // Slightly positive bias
                 const openPrice = basePrice;
                 const closePrice = basePrice + change;
                 const highPrice = Math.max(openPrice, closePrice) + Math.random() * 3;
@@ -208,7 +209,7 @@
                 low.push(lowPrice);
                 close.push(closePrice);
 
-                basePrice = closePrice;
+                basePrice = closePrice > 0 ? closePrice : 1;
 
                 const aiReturn = change * (1 + Math.random() * 0.3);
                 const bhReturn = change;
@@ -287,7 +288,7 @@
             },
             shapes: [],
             annotations: [],
-            dragmode: 'zoom',
+            dragmode: 'pan',
             plot_bgcolor: 'rgba(255,255,255,0.9)',
             paper_bgcolor: 'rgba(255,255,255,0.9)',
             margin: { t: 50, b: 50, l: 60, r: 60 }
@@ -295,55 +296,39 @@
 
         const data = [candlestickTrace, portfolioTrace, benchmarkTrace];
 
-        // 차트 생성
         Plotly.newPlot('chartDiv', data, layout, {
             responsive: true,
             displayModeBar: true,
             modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d']
         });
 
-        // 자석 기능 변수들
+        // --- 분석 도구 및 자석 기능 시스템 ---
         let magnetEnabled = true;
-        const magnetThreshold = 15;
-        const magnetBtn = document.getElementById('magnetBtn');
-        const magnetIndicator = document.getElementById('magnetIndicator');
-
-        // 분석 도구 시스템
         let currentTool = null;
         let drawingIdCounter = 0;
+        let relayoutTimeout = null;
 
+        const magnetBtn = document.getElementById('magnetBtn');
         const toolButtons = document.querySelectorAll('.tool-btn');
         const undoBtn = document.getElementById('undoBtn');
         const clearBtn = document.getElementById('clearBtn');
         const statusElement = document.getElementById('tool-status');
         const coordinatesElement = document.getElementById('coordinates');
 
-        // 피보나치 레벨 설정
         const fiboLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
         const fiboExtLevels = [1, 1.236, 1.382, 1.5, 1.618, 2, 2.618];
         const fiboColors = ['#787878', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3', '#FF7F00', '#FFD700'];
 
-        // 자석 기능 토글
         magnetBtn.addEventListener('click', () => {
             magnetEnabled = !magnetEnabled;
-            magnetBtn.classList.toggle('magnet', magnetEnabled);
             magnetBtn.classList.toggle('active', magnetEnabled);
-
-            if (!magnetEnabled) {
-                magnetIndicator.style.display = 'none';
-            }
-
             updateStatus();
         });
 
-        // 가장 가까운 캔들 데이터 포인트 찾기
         function findNearestCandlePoint(x, y) {
-            if (!magnetEnabled) return { x, y, snapped: false };
-
-            // x 좌표에서 가장 가까운 날짜 인덱스 찾기
+            if (!chartData || chartData.dates.length === 0) return { x, y, snapped: false };
             let closestDateIndex = 0;
             let minDistance = Infinity;
-
             chartData.dates.forEach((date, index) => {
                 const distance = Math.abs(new Date(x).getTime() - new Date(date).getTime());
                 if (distance < minDistance) {
@@ -352,471 +337,209 @@
                 }
             });
 
-            // 해당 날짜의 OHLC 값들
-            const ohlcPoints = [
-                { price: chartData.open[closestDateIndex], type: 'Open' },
-                { price: chartData.high[closestDateIndex], type: 'High' },
-                { price: chartData.low[closestDateIndex], type: 'Low' },
-                { price: chartData.close[closestDateIndex], type: 'Close' }
-            ];
+            const ohlcPrices = [chartData.open[closestDateIndex], chartData.high[closestDateIndex], chartData.low[closestDateIndex], chartData.close[closestDateIndex]];
+            let closestPrice = ohlcPrices[0];
+            let minPriceDistance = Math.abs(closestPrice - y);
 
-            // y 좌표에서 가장 가까운 OHLC 포인트 찾기
-            let closestPoint = ohlcPoints[0];
-            let minYDistance = Math.abs(ohlcPoints[0].price - y);
-
-            ohlcPoints.forEach(point => {
-                const distance = Math.abs(point.price - y);
-                if (distance < minYDistance) {
-                    minYDistance = distance;
-                    closestPoint = point;
+            ohlcPrices.forEach(price => {
+                const distance = Math.abs(price - y);
+                if (distance < minPriceDistance) {
+                    minPriceDistance = distance;
+                    closestPrice = price;
                 }
             });
 
-            return {
-                x: chartData.dates[closestDateIndex],
-                y: closestPoint.price,
-                snapped: true,
-                type: closestPoint.type
-            };
+            return { x: chartData.dates[closestDateIndex], y: closestPrice, snapped: true };
         }
 
         function setActiveTool(toolName) {
             currentTool = (currentTool === toolName) ? null : toolName;
-
-            toolButtons.forEach(btn => {
-                btn.classList.toggle('active', btn.id === `tool-${currentTool}`);
-            });
-
-            let dragmode = 'zoom';
-            if (['trendline', 'horizontal', 'vertical', 'arrow'].includes(currentTool)) {
-                dragmode = 'drawline';
-            } else if (['rectangle', 'fibonacci', 'fibonacci-ext', 'channel'].includes(currentTool)) {
-                dragmode = 'drawrect';
-            }
-
+            toolButtons.forEach(btn => btn.classList.toggle('active', btn.id === `tool-${currentTool}`));
+            let dragmode = 'pan';
+            if (['trendline', 'horizontal', 'vertical', 'arrow'].includes(currentTool)) dragmode = 'drawline';
+            else if (['rectangle', 'fibonacci', 'fibonacci-ext', 'channel'].includes(currentTool)) dragmode = 'drawrect';
             layout.dragmode = dragmode;
             Plotly.relayout('chartDiv', { dragmode: dragmode });
-
             updateStatus();
         }
 
         function updateStatus() {
             const magnetStatus = magnetEnabled ? ' (🧲 자석 ON)' : ' (자석 OFF)';
-            const messages = {
-                null: '도구를 선택하여 분석을 시작하세요' + magnetStatus,
-                'trendline': '두 점을 클릭하여 추세선을 그으세요' + magnetStatus,
-                'horizontal': '수평선을 그을 위치를 클릭하세요' + magnetStatus,
-                'vertical': '수직선을 그을 위치를 클릭하세요' + magnetStatus,
-                'fibonacci': '드래그하여 피보나치 되돌림 영역을 설정하세요' + magnetStatus,
-                'fibonacci-ext': '드래그하여 피보나치 확장 영역을 설정하세요' + magnetStatus,
-                'rectangle': '드래그하여 사각형을 그으세요' + magnetStatus,
-                'channel': '드래그하여 채널을 설정하세요' + magnetStatus,
-                'text': '텍스트를 추가할 위치를 클릭하세요' + magnetStatus,
-                'arrow': '드래그하여 화살표를 그으세요' + magnetStatus
-            };
-            statusElement.textContent = messages[currentTool] || messages[null];
+            const messages = { null: '도구를 선택하여 분석을 시작하세요' + magnetStatus, 'trendline': '두 점을 클릭하여 추세선을 그으세요' + magnetStatus, 'horizontal': '수평선을 그을 위치를 클릭하세요' + magnetStatus, 'vertical': '수직선을 그을 위치를 클릭하세요' + magnetStatus, 'fibonacci': '드래그하여 피보나치 되돌림 영역을 설정하세요' + magnetStatus, 'fibonacci-ext': '드래그하여 피보나치 확장 영역을 설정하세요' + magnetStatus, 'rectangle': '드래그하여 사각형을 그으세요' + magnetStatus, 'channel': '드래그하여 채널을 설정하세요' + magnetStatus, 'text': '텍스트를 추가할 위치를 클릭하세요' + magnetStatus, 'arrow': '드래그하여 화살표를 그으세요' + magnetStatus };
+            statusElement.textContent = messages[currentTool] || messages.null;
         }
 
-        // 도구 버튼 이벤트
-        toolButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const toolName = btn.id.split('-').slice(1).join('-');
-                setActiveTool(toolName);
-            });
-        });
-
-        // 지우기 및 되돌리기
+        toolButtons.forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.id.split('-').slice(1).join('-'))));
         clearBtn.addEventListener('click', () => {
             layout.shapes = [];
             layout.annotations = [];
             Plotly.react('chartDiv', data, layout);
         });
-
         undoBtn.addEventListener('click', () => {
-            if (layout.shapes.length > 0 || layout.annotations.length > 0) {
-                const lastDrawingId = Math.max(
-                    ...layout.shapes.filter(s => s.drawing_id).map(s => parseInt(s.drawing_id.split('-')[1]) || 0),
-                    ...layout.annotations.filter(a => a.drawing_id).map(a => parseInt(a.drawing_id.split('-')[1]) || 0),
-                    0
-                );
-
-                if (lastDrawingId > 0) {
-                    const drawingId = `drawing-${lastDrawingId}`;
-                    layout.shapes = layout.shapes.filter(s => s.drawing_id !== drawingId);
-                    layout.annotations = layout.annotations.filter(a => a.drawing_id !== drawingId);
-                } else {
-                    if (layout.shapes.length > 0) layout.shapes.pop();
-                    else if (layout.annotations.length > 0) layout.annotations.pop();
-                }
-
-                Plotly.react('chartDiv', data, layout);
+            const lastDrawingIdNum = Math.max(0, ...layout.shapes.map(s => parseInt(s.drawing_id?.split('-')[1] || 0)), ...layout.annotations.map(a => parseInt(a.drawing_id?.split('-')[1] || 0)));
+            if (lastDrawingIdNum > 0) {
+                const drawingId = `drawing-${lastDrawingIdNum}`;
+                layout.shapes = layout.shapes.filter(s => s.drawing_id !== drawingId);
+                layout.annotations = layout.annotations.filter(a => a.drawing_id !== drawingId);
+            } else {
+                if (layout.shapes.length > 0) layout.shapes.pop();
+                else if (layout.annotations.length > 0) layout.annotations.pop();
             }
+            Plotly.react('chartDiv', data, layout);
         });
 
-        // 피보나치 되돌림 계산
         function createFibonacciRetracement(rect, drawingId) {
             const y_start = Math.min(rect.y0, rect.y1);
             const y_end = Math.max(rect.y0, rect.y1);
             const y_diff = y_end - y_start;
+            const descending = rect.y0 > rect.y1;
 
             fiboLevels.forEach((level, i) => {
-                const level_y = rect.y0 > rect.y1 ? y_end - y_diff * level : y_start + y_diff * level;
-
-                layout.shapes.push({
-                    type: 'line',
-                    x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y,
-                    line: { color: fiboColors[i], width: 1, dash: level === 0 || level === 1 ? 'solid' : 'dot' },
-                    name: 'fib_line',
-                    drawing_id: drawingId,
-                    editable: false
-                });
-
-                layout.annotations.push({
-                    x: rect.x1, y: level_y,
-                    text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`,
-                    showarrow: false,
-                    font: { color: fiboColors[i], size: 10 },
-                    xanchor: 'left',
-                    yanchor: 'middle',
-                    name: 'fib_annotation',
-                    drawing_id: drawingId
-                });
+                const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
+                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: level === 0 || level === 1 ? 'solid' : 'dot' }, name: 'fib_line', drawing_id: drawingId, editable: false });
+                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: 'fib_annotation', drawing_id: drawingId });
             });
         }
 
-        // 피보나치 확장 계산
         function createFibonacciExtension(rect, drawingId) {
             const y_start = Math.min(rect.y0, rect.y1);
             const y_end = Math.max(rect.y0, rect.y1);
             const y_diff = y_end - y_start;
+            const descending = rect.y0 > rect.y1;
 
             fiboExtLevels.forEach((level, i) => {
-                const level_y = rect.y0 > rect.y1 ? y_end - y_diff * level : y_start + y_diff * level;
-
-                layout.shapes.push({
-                    type: 'line',
-                    x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y,
-                    line: { color: fiboColors[i % fiboColors.length], width: 1, dash: 'dash' },
-                    name: 'fib_ext_line',
-                    drawing_id: drawingId,
-                    editable: false
-                });
-
-                layout.annotations.push({
-                    x: rect.x1, y: level_y,
-                    text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`,
-                    showarrow: false,
-                    font: { color: fiboColors[i % fiboColors.length], size: 10 },
-                    xanchor: 'left',
-                    yanchor: 'middle',
-                    name: 'fib_ext_annotation',
-                    drawing_id: drawingId
-                });
+                const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
+                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: 'dash' }, name: 'fib_ext_line', drawing_id: drawingId, editable: false });
+                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: 'fib_ext_annotation', drawing_id: drawingId });
             });
         }
-
-        // 채널 생성
+        
         function createChannel(rect, drawingId) {
             const y_diff = rect.y1 - rect.y0;
-
-            // 상단 라인
-            layout.shapes.push({
-                type: 'line',
-                x0: rect.x0, y0: rect.y1, x1: rect.x1, y1: rect.y1,
-                line: { color: '#0066cc', width: 2 },
-                name: 'channel_top',
-                drawing_id: drawingId,
-                editable: true
-            });
-
-            // 하단 라인
-            layout.shapes.push({
-                type: 'line',
-                x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y0,
-                line: { color: '#0066cc', width: 2 },
-                name: 'channel_bottom',
-                drawing_id: drawingId,
-                editable: true
-            });
-
-            // 중앙 라인
+            layout.shapes.push({ type: 'line', x0: rect.x0, y0: rect.y1, x1: rect.x1, y1: rect.y1, line: { color: '#0066cc', width: 2 }, name: 'channel_top', drawing_id: drawingId, editable: true });
+            layout.shapes.push({ type: 'line', x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y0, line: { color: '#0066cc', width: 2 }, name: 'channel_bottom', drawing_id: drawingId, editable: true });
             const mid_y = rect.y0 + y_diff / 2;
-            layout.shapes.push({
-                type: 'line',
-                x0: rect.x0, y0: mid_y, x1: rect.x1, y1: mid_y,
-                name: 'channel_mid',
-                drawing_id: drawingId,
-                editable: false
-            });
+            layout.shapes.push({ type: 'line', x0: rect.x0, y0: mid_y, x1: rect.x1, y1: mid_y, name: 'channel_mid', drawing_id: drawingId, editable: false });
         }
 
-        // 자석 효과가 적용된 relayout 이벤트 핸들러
         chartDiv.on('plotly_relayout', (eventData) => {
-            // 새로운 도형이 그려진 경우
-            if (currentTool && (eventData['shapes[0].x0'] !== undefined ||
-                (eventData.shapes && eventData.shapes.length > layout.shapes.length))) {
+            clearTimeout(relayoutTimeout);
+
+            // Case 1: A new shape is being drawn (a tool is active)
+            if (currentTool) {
+                const lastShape = layout.shapes[layout.shapes.length - 1];
+                if (!lastShape) return;
 
                 const drawingId = `drawing-${drawingIdCounter++}`;
-                const lastShape = layout.shapes[layout.shapes.length - 1];
 
-                if (lastShape && magnetEnabled) {
-                    // 자석 기능 적용 - 시작점과 끝점을 캔들 포인트에 스냅
+                if (magnetEnabled) {
                     const snappedStart = findNearestCandlePoint(lastShape.x0, lastShape.y0);
                     const snappedEnd = findNearestCandlePoint(lastShape.x1, lastShape.y1);
-
-                    lastShape.x0 = snappedStart.x;
-                    lastShape.y0 = snappedStart.y;
-                    lastShape.x1 = snappedEnd.x;
-                    lastShape.y1 = snappedEnd.y;
+                    lastShape.x0 = snappedStart.x; lastShape.y0 = snappedStart.y;
+                    lastShape.x1 = snappedEnd.x; lastShape.y1 = snappedEnd.y;
                 }
 
-                if (lastShape) {
-                    lastShape.drawing_id = drawingId;
-                    lastShape.editable = true;
+                lastShape.drawing_id = drawingId;
+                lastShape.editable = true;
 
-                    // 도구별 처리
-                    switch(currentTool) {
-                        case 'trendline':
-                            lastShape.name = 'trendline';
-                            lastShape.line = { color: '#0066cc', width: 2 };
-                            break;
-
-                        case 'horizontal':
-                            lastShape.name = 'horizontal';
-                            lastShape.line = { color: '#ff6b6b', width: 2 };
-                            // 수평선은 y값만 스냅
-                            if (magnetEnabled) {
-                                const snappedY = findNearestCandlePoint(lastShape.x0, lastShape.y0).y;
-                                lastShape.y0 = snappedY;
-                                lastShape.y1 = snappedY;
-                            }
-                            break;
-
-                        case 'vertical':
-                            lastShape.name = 'vertical';
-                            lastShape.line = { color: '#4ecdc4', width: 2 };
-                            // 수직선은 x값만 스냅
-                            if (magnetEnabled) {
-                                const snappedX = findNearestCandlePoint(lastShape.x0, lastShape.y0).x;
-                                lastShape.x0 = snappedX;
-                                lastShape.x1 = snappedX;
-                            }
-                            break;
-
-                        case 'fibonacci':
-                            lastShape.name = 'fib_bg';
-                            lastShape.fillcolor = 'rgba(102, 126, 234, 0.1)';
-                            lastShape.line = { width: 0 };
-                            createFibonacciRetracement(lastShape, drawingId);
-                            break;
-
-                        case 'fibonacci-ext':
-                            lastShape.name = 'fib_ext_bg';
-                            lastShape.fillcolor = 'rgba(255, 107, 107, 0.1)';
-                            lastShape.line = { width: 0 };
-                            createFibonacciExtension(lastShape, drawingId);
-                            break;
-
-                        case 'rectangle':
-                            lastShape.name = 'rectangle';
-                            lastShape.line = { color: '#45b7d1', width: 2 };
-                            lastShape.fillcolor = 'rgba(69, 183, 209, 0.1)';
-                            break;
-
-                        case 'channel':
-                            lastShape.name = 'channel_bg';
-                            lastShape.fillcolor = 'rgba(0, 102, 204, 0.05)';
-                            lastShape.line = { width: 0 };
-                            createChannel(lastShape, drawingId);
-                            break;
-
-                        case 'arrow':
-                            lastShape.name = 'arrow';
-                            lastShape.line = { color: '#e74c3c', width: 3 };
-                            // 화살표 머리 추가
-                            layout.annotations.push({
-                                x: lastShape.x1,
-                                y: lastShape.y1,
-                                text: '▶',
-                                showarrow: false,
-                                font: { size: 16, color: '#e74c3c' },
-                                name: 'arrow_head',
-                                drawing_id: drawingId
-                            });
-                            break;
-                    }
-
-                    setActiveTool(currentTool); // 도구 비활성화
-                    Plotly.react('chartDiv', data, layout);
+                switch(currentTool) {
+                    case 'trendline': lastShape.name = 'trendline'; lastShape.line = { color: '#0066cc', width: 2 }; break;
+                    case 'horizontal': lastShape.name = 'horizontal'; lastShape.y1 = lastShape.y0; lastShape.line = { color: '#ff6b6b', width: 2 }; break;
+                    case 'vertical': lastShape.name = 'vertical'; lastShape.x1 = lastShape.x0; lastShape.line = { color: '#4ecdc4', width: 2 }; break;
+                    case 'rectangle': lastShape.name = 'rectangle'; lastShape.line = { color: '#45b7d1', width: 2 }; lastShape.fillcolor = 'rgba(69, 183, 209, 0.1)'; break;
+                    case 'fibonacci':
+                        lastShape.name = 'fib_bg';
+                        lastShape.fillcolor = 'rgba(102, 126, 234, 0.1)';
+                        lastShape.line = { width: 0 };
+                        createFibonacciRetracement(lastShape, drawingId);
+                        break;
+                    case 'fibonacci-ext':
+                        lastShape.name = 'fib_ext_bg';
+                        lastShape.fillcolor = 'rgba(255, 107, 107, 0.1)';
+                        lastShape.line = { width: 0 };
+                        createFibonacciExtension(lastShape, drawingId);
+                        break;
+                    case 'channel':
+                        lastShape.name = 'channel_bg';
+                        lastShape.fillcolor = 'rgba(0, 102, 204, 0.05)';
+                        lastShape.line = { width: 0 };
+                        createChannel(lastShape, drawingId);
+                        break;
+                    case 'arrow':
+                        lastShape.name = 'arrow';
+                        lastShape.line = { color: '#e74c3c', width: 3 };
+                        layout.annotations.push({ x: lastShape.x1, y: lastShape.y1, text: '▶', showarrow: false, font: { size: 16, color: '#e74c3c' }, name: 'arrow_head', drawing_id: drawingId });
+                        break;
                 }
-            }
+                setActiveTool(currentTool); // Deactivate tool
+                Plotly.react('chartDiv', data, layout);
 
-            // 기존 도형이 편집된 경우
+            } 
+            // Case 2: An existing shape is being edited (no tool is active)
             else if (Object.keys(eventData).some(k => k.startsWith('shapes['))) {
-                const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
-                const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
-                const editedShape = layout.shapes[shapeIndex];
+                relayoutTimeout = setTimeout(() => {
+                    const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
+                    if (!shapeKey) return;
+                    const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
+                    const editedShape = layout.shapes[shapeIndex];
 
-                if (editedShape) {
-                    // 편집 시에도 자석 효과 적용
-                    if (magnetEnabled && editedShape.editable) {
-                        const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
-                        const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
+                    if (editedShape && editedShape.editable) {
+                        if (magnetEnabled) {
+                            const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
+                            const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
+                            editedShape.x0 = snappedStart.x; editedShape.y0 = snappedStart.y;
+                            editedShape.x1 = snappedEnd.x; editedShape.y1 = snappedEnd.y;
+                        }
 
-                        editedShape.x0 = snappedStart.x;
-                        editedShape.y0 = snappedStart.y;
-                        editedShape.x1 = snappedEnd.x;
-                        editedShape.y1 = snappedEnd.y;
+                        if (editedShape.name === 'fib_bg') {
+                            layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === 'fib_bg');
+                            layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
+                            createFibonacciRetracement(editedShape, editedShape.drawing_id);
+                        }
+                        else if (editedShape.name === 'fib_ext_bg') {
+                            layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === 'fib_ext_bg');
+                            layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
+                            createFibonacciExtension(editedShape, editedShape.drawing_id);
+                        }
+                        Plotly.react('chartDiv', data, layout);
                     }
-
-                    // 피보나치 관련 도형들의 업데이트
-                    if (editedShape.name === 'fib_bg') {
-                        layout.shapes = layout.shapes.filter(s =>
-                            s.drawing_id !== editedShape.drawing_id || s.name === 'fib_bg'
-                        );
-                        layout.annotations = layout.annotations.filter(a =>
-                            a.drawing_id !== editedShape.drawing_id
-                        );
-                        createFibonacciRetracement(editedShape, editedShape.drawing_id);
-
-                        Plotly.relayout('chartDiv', {
-                            shapes: layout.shapes,
-                            annotations: layout.annotations
-                        });
-                    }
-                    else if (editedShape.name === 'fib_ext_bg') {
-                        layout.shapes = layout.shapes.filter(s =>
-                            s.drawing_id !== editedShape.drawing_id || s.name === 'fib_ext_bg'
-                        );
-                        layout.annotations = layout.annotations.filter(a =>
-                            a.drawing_id !== editedShape.drawing_id
-                        );
-                        createFibonacciExtension(editedShape, editedShape.drawing_id);
-
-                        Plotly.relayout('chartDiv', {
-                            shapes: layout.shapes,
-                            annotations: layout.annotations
-                        });
-                    }
-                }
+                }, 150); // 150ms delay for snap-on-release
             }
         });
 
-        // 마우스 움직임과 클릭 이벤트
         chartDiv.on('plotly_hover', (eventData) => {
-            if (eventData.points && eventData.points.length > 0) {
-                const point = eventData.points[0];
-                let priceText = '';
-
-                if (point.y !== undefined) {
-                    priceText = point.y.toFixed(2);
-                } else if (point.close !== undefined) {
-                    priceText = `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}`;
-                }
-
-                coordinatesElement.innerHTML = `
-                    <strong>날짜:</strong> ${point.x} |
-                    <strong>가격:</strong> ${priceText}
-                    ${magnetEnabled ? ' | <span style="color: #27ae60;"> 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}
-                `;
-            }
+            const point = eventData.points[0];
+            const priceText = point.close !== undefined ? `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}` : (point.y !== undefined ? point.y.toFixed(2) : '');
+            coordinatesElement.innerHTML = `<strong>날짜:</strong> ${point.x} | <strong>가격:</strong> ${priceText}`;
         });
 
-        chartDiv.on('plotly_unhover', () => {
-            coordinatesElement.innerHTML = `마우스를 차트에 올려보세요 ${magnetEnabled ? ' | <span style="color: #27ae60;"> 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}`;
-        });
+        chartDiv.on('plotly_unhover', () => { coordinatesElement.innerHTML = '마우스를 차트에 올려보세요'; });
 
-        // 텍스트 도구 클릭 이벤트
         chartDiv.on('plotly_click', (eventData) => {
-            if (currentTool === 'text' && eventData.points && eventData.points.length > 0) {
+            if (currentTool === 'text' && eventData.points.length > 0) {
                 let point = eventData.points[0];
-
-                // 자석이 활성화된 경우 스냅
                 if (magnetEnabled) {
                     const snapped = findNearestCandlePoint(point.x, point.y);
-                    if (snapped.snapped) {
-                        point = { x: snapped.x, y: snapped.y };
-                    }
+                    if (snapped.snapped) point = { x: snapped.x, y: snapped.y };
                 }
-
                 const text = prompt('추가할 텍스트를 입력하세요:', '분석 메모');
-
                 if (text) {
                     const drawingId = `drawing-${drawingIdCounter++}`;
-                    layout.annotations.push({
-                        x: point.x,
-                        y: point.y,
-                        text: text,
-                        showarrow: true,
-                        arrowhead: 2,
-                        arrowsize: 1,
-                        arrowwidth: 2,
-                        arrowcolor: '#667eea',
-                        font: {
-                            size: 12,
-                            color: '#2c3e50',
-                            family: 'Arial Black'
-                        },
-                        bgcolor: 'rgba(255,255,255,0.8)',
-                        bordercolor: '#667eea',
-                        borderwidth: 2,
-                        borderpad: 4,
-                        name: 'text_annotation',
-                        drawing_id: drawingId,
-                        editable: true
-                    });
-
+                    layout.annotations.push({ x: point.x, y: point.y, text: text, showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: 2, arrowcolor: '#667eea', font: { size: 12, color: '#2c3e50', family: 'Arial Black' }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: '#667eea', borderwidth: 2, borderpad: 4, name: 'text_annotation', drawing_id: drawingId, editable: true });
                     setActiveTool(currentTool);
                     Plotly.react('chartDiv', data, layout);
                 }
             }
         });
 
-        // 키보드 단축키
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey || e.metaKey) {
-                switch(e.key) {
-                    case 'z':
-                        e.preventDefault();
-                        undoBtn.click();
-                        break;
-                    case 'm':
-                        e.preventDefault();
-                        magnetBtn.click();
-                        break;
-                }
+                if (e.key === 'z') { e.preventDefault(); undoBtn.click(); }
+                if (e.key === 'm') { e.preventDefault(); magnetBtn.click(); }
             }
-
-            // ESC 키로 현재 도구 해제
-            if (e.key === 'Escape') {
-                setActiveTool(null);
-            }
-
-            // 도구별 단축키
-            if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-                switch(e.key) {
-                    case '1': setActiveTool('trendline'); break;
-                    case '2': setActiveTool('horizontal'); break;
-                    case '3': setActiveTool('vertical'); break;
-                    case '4': setActiveTool('fibonacci'); break;
-                    case '5': setActiveTool('rectangle'); break;
-                    case '6': setActiveTool('channel'); break;
-                    case '7': setActiveTool('text'); break;
-                    case '8': setActiveTool('arrow'); break;
-                    case 'm': magnetBtn.click(); break;
-                }
-            }
+            if (e.key === 'Escape') setActiveTool(null);
         });
 
-        // 초기 상태 설정
         updateStatus();
-
-        // 차트 크기 조정 이벤트
-        window.addEventListener('resize', () => {
-            Plotly.Plots.resize(chartDiv);
-        });
-
-
+        window.addEventListener('resize', () => Plotly.Plots.resize(chartDiv));
     </script>
-</body>
-</html>
