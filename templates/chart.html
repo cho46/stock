@@ -135,7 +135,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 class="title">고급 차트 분석 도구</h1>
+            <h1 class="title">차트 분석 도구</h1>
             <div class="toolbar">
                 <div class="tool-group">
                     <button id="magnetBtn" class="btn magnet active" title="자석 기능 (캔들에 자동 붙기)">
@@ -263,7 +263,7 @@
 
         const layout = {
             title: {
-                text: '고급 기술적 분석 (자석 기능)',
+                text: '차트분석',
                 font: { size: 20, color: '#2c3e50' }
             },
             xaxis: {
@@ -717,13 +717,13 @@
                 coordinatesElement.innerHTML = `
                     <strong>날짜:</strong> ${point.x} |
                     <strong>가격:</strong> ${priceText}
-                    ${magnetEnabled ? ' | <span style="color: #27ae60;">🧲 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}
+                    ${magnetEnabled ? ' | <span style="color: #27ae60;"> 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}
                 `;
             }
         });
 
         chartDiv.on('plotly_unhover', () => {
-            coordinatesElement.innerHTML = `마우스를 차트에 올려보세요 ${magnetEnabled ? ' | <span style="color: #27ae60;">🧲 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}`;
+            coordinatesElement.innerHTML = `마우스를 차트에 올려보세요 ${magnetEnabled ? ' | <span style="color: #27ae60;"> 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}`;
         });
 
         // 텍스트 도구 클릭 이벤트
