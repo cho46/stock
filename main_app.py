@@ -85,8 +85,6 @@ class UsStockInfo(db.Model):
     ticker = db.Column(db.String(20), primary_key=True, nullable=False)
     name = db.Column(db.String(255), nullable=False)
     exchange = db.Column(db.String(20), nullable=False)
-    sector = db.Column(db.String(100))
-    market_cap = db.Column(db.BigInteger)
 
     def __repr__(self):
         return f'<UsStockInfo {self.ticker} - {self.name}>'
@@ -292,8 +290,7 @@ def search_us_stock_route():
         return jsonify([{
             'ticker': r.ticker,
             'name': r.name,
-            'exchange': r.exchange,
-            'sector': r.sector
+            'exchange': r.exchange
         } for r in results])
 
     except Exception as e:

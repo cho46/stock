@@ -739,7 +739,7 @@
 
         async function loadModels() {
             try {
-                const response = await fetch('/models');
+                const response = await fetch('/model');
                 if (!response.ok) {
                     throw new Error('서버에서 모델 목록을 가져오는 데 실패했습니다.');
                 }
@@ -750,7 +750,10 @@
                     modelSelect.innerHTML = '<option value="">사용 가능한 모델이 없습니다. 먼저 모델을 훈련시켜주세요.</option>';
                 } else {
                     models.forEach(model => {
-                        const option = new Option(model, model);
+                        // 객체의 속성을 사용하여 옵션의 텍스트와 값을 올바르게 설정
+                        const optionText = `${model.filename} (종목: ${model.symbol}, 전략: ${model.strategy})`;
+                        const optionValue = model.filename;
+                        const option = new Option(optionText, optionValue);
                         modelSelect.add(option);
                     });
                 }
@@ -777,6 +780,7 @@
                 try {
                     const response = await fetch(`/api/search_us_stock?query=${encodeURIComponent(query)}`);
                     const results = await response.json();
+                    console.log('Search API response:', results); // 디버깅을 위한 로그 추가
                     
                     resultsContainer.innerHTML = '';
                     if (results.length > 0) {
