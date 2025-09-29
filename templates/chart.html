@@ -1,145 +1,272 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>고급 차트 분석 도구 (자석 기능)</title>
-    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        body, html {
-            margin: 0; padding: 0; width: 100%; height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            overflow: hidden;
-        }
-        .container {
-            width: 100%; height: 100%;
-            display: flex; flex-direction: column;
-            backdrop-filter: blur(10px);
-            background: rgba(255, 255, 255, 0.1);
-        }
-        .header {
-            padding: 15px 20px;
-            background: rgba(255, 255, 255, 0.95);
-            border-bottom: 1px solid rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+.header { 
+            padding: 15px 20px; 
+            background: rgba(255, 255, 255, 0.95); 
+            border-bottom: 1px solid rgba(0,0,0,0.1); 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            flex-wrap: wrap;
+            gap: 10px;
         }
-        .title {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #2c3e50;
+        .title { 
+            font-size: 1.6rem; 
+            font-weight: 700; 
+            color: #2c3e50; 
             margin: 0;
-        }
-        .toolbar {
             display: flex;
-            gap: 8px;
+            align-items: center;
+            gap: 10px;
+        }
+        .ai-recommendation {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            animation: pulse-glow 2s infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 10px rgba(231, 76, 60, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(231, 76, 60, 0.6); }
+        }
+        .toolbar { 
+            display: flex; 
+            gap: 8px; 
             flex-wrap: wrap;
             align-items: center;
         }
-        .tool-group {
-            display: flex;
-            gap: 4px;
-            padding: 4px;
-            background: rgba(255,255,255,0.8);
-            border-radius: 10px;
+        .tool-group { 
+            display: flex; 
+            gap: 4px; 
+            padding: 4px; 
+            background: rgba(255,255,255,0.8); 
+            border-radius: 10px; 
             border: 1px solid rgba(0,0,0,0.1);
         }
-        .btn {
-            padding: 10px 14px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 600;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
+        .btn { 
+            padding: 8px 12px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 0.85rem; 
+            font-weight: 600; 
+            transition: all 0.3s ease;
+            display: inline-flex; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 4px; 
             background: rgba(255,255,255,0.9);
             color: #2c3e50;
             border: 1px solid rgba(0,0,0,0.1);
-            position: relative;
-            overflow: hidden;
         }
-        .btn:hover {
+        .btn:hover { 
             background: rgba(255,255,255,1);
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
         }
-        .btn.active {
+        .btn.active { 
             background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            transform: scale(1.05);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            color: white; 
+            box-shadow: 0 3px 15px rgba(102, 126, 234, 0.4);
         }
-        .btn.magnet {
+        .btn.magnet { 
             background: linear-gradient(45deg, #27ae60, #2ecc71);
             color: white;
-            position: relative;
         }
-        .btn.magnet::after {
-            content: '';
-            position: absolute;
-            top: 2px; right: 2px;
-            width: 8px; height: 8px;
-            background: #f39c12;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.3); opacity: 0.7; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        .btn.danger {
+        .btn.danger { 
             background: linear-gradient(45deg, #ff6b6b, #ee5a52);
             color: white;
         }
-        #chartDiv {
-            flex-grow: 1;
+        
+        .main-content {
+            display: flex;
+            flex: 1;
+            gap: 15px;
+            padding: 15px;
+            min-height: 0;
+        }
+        
+        .chart-container {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
             background: rgba(255,255,255,0.95);
-            margin: 10px;
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             overflow: hidden;
         }
-        .status-bar {
-            padding: 8px 20px;
-            background: rgba(255,255,255,0.9);
-            border-top: 1px solid rgba(0,0,0,0.1);
+        
+        #chartDiv { 
+            flex: 1;
+            min-height: 500px;
+        }
+        
+        .sidebar {
+            flex: 0 0 350px;
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow-y: auto;
+            max-height: calc(100vh - 150px);
+        }
+        
+        .performance-dashboard {
+            padding: 20px;
+        }
+        
+        .dashboard-header {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .metric-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
             font-size: 0.85rem;
-            color: #666;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .positive { color: #27ae60; }
+        .negative { color: #e74c3c; }
+        .neutral { color: #f39c12; }
+        
+        .trades-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .trades-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .trade-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 4px solid;
+        }
+        
+        .trade-buy { border-left-color: #27ae60; }
+        .trade-sell { border-left-color: #e74c3c; }
+        
+        .trade-date {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-bottom: 4px;
+        }
+        
+        .trade-details {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .magnet-indicator {
-            position: absolute;
-            width: 12px;
-            height: 12px;
-            border: 2px solid #e74c3c;
-            border-radius: 50%;
-            background: rgba(231, 76, 60, 0.2);
-            pointer-events: none;
-            z-index: 1000;
-            display: none;
-            transform: translate(-50%, -50%);
+        
+        .trade-type {
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .trade-price {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+        }
+        
+        .status-bar { 
+            padding: 10px 20px; 
+            background: rgba(255,255,255,0.9); 
+            border-top: 1px solid rgba(0,0,0,0.1); 
+            font-size: 0.85rem; 
+            color: #666; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content {
+                flex-direction: column;
+            }
+            .sidebar {
+                flex: none;
+                max-height: 400px;
+            }
+            .metric-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .toolbar {
+                justify-content: center;
+            }
+            .title {
+                justify-content: center;
+                font-size: 1.3rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1 class="title">차트 분석 도구</h1>
+            <div class="title">
+                <i class="fas fa-robot"></i>
+                <span id="chartTitle">AI 주식 거래 분석</span>
+                <div id="aiRecommendation" class="ai-recommendation" style="display:none;">
+                    <i class="fas fa-brain"></i>
+                    <span id="recommendationText">오늘의 AI 추천: 보유</span>
+                </div>
+            </div>
             <div class="toolbar">
                 <div class="tool-group">
-                    <button id="toggleAIBtn" class="btn active" title="AI 분석 표시/숨기기"><i class="fas fa-robot"></i> AI 분석</button>
+                    <button id="toggleAIBtn" class="btn active" title="AI 분석 표시/숨기기">
+                        <i class="fas fa-robot"></i> AI 분석
+                    </button>
+                    <button id="toggleSidebarBtn" class="btn active" title="성과 대시보드 표시/숨기기">
+                        <i class="fas fa-chart-bar"></i> 성과
+                    </button>
                 </div>
+                
                 <div class="tool-group">
                     <button class="btn range-btn" data-range="1m">1M</button>
                     <button class="btn range-btn" data-range="3m">3M</button>
@@ -147,176 +274,384 @@
                     <button class="btn range-btn" data-range="1y">1Y</button>
                     <button class="btn range-btn active" data-range="all">All</button>
                 </div>
+                
                 <div class="tool-group">
-                    <button id="magnetBtn" class="btn magnet active" title="자석 기능 (캔들에 자동 붙기)">
+                    <button id="magnetBtn" class="btn magnet active" title="자석 기능">
                         <i class="fas fa-magnet"></i> 자석
                     </button>
                 </div>
-
+                
                 <div class="tool-group">
-                    <button id="tool-trendline" class="btn tool-btn" title="추세선"><i class="fas fa-chart-line"></i> 추세선</button>
-                    <button id="tool-horizontal" class="btn tool-btn" title="수평선"><i class="fas fa-minus"></i> 수평선</button>
-                    <button id="tool-vertical" class="btn tool-btn" title="수직선"><i class="fas fa-grip-lines-vertical"></i> 수직선</button>
+                    <button id="tool-trendline" class="btn tool-btn" title="추세선">
+                        <i class="fas fa-chart-line"></i> 추세선
+                    </button>
+                    <button id="tool-horizontal" class="btn tool-btn" title="수평선">
+                        <i class="fas fa-minus"></i> 수평선
+                    </button>
+                    <button id="tool-fibonacci" class="btn tool-btn" title="피보나치">
+                        <i class="fas fa-wave-square"></i> 피보나치
+                    </button>
                 </div>
-
+                
                 <div class="tool-group">
-                    <button id="tool-fibonacci" class="btn tool-btn" title="피보나치 되돌림"><i class="fas fa-wave-square"></i> 피보나치</button>
-                    <button id="tool-fibonacci-ext" class="btn tool-btn" title="피보나치 확장"><i class="fas fa-expand-arrows-alt"></i> 피보 확장</button>
-                </div>
-
-                <div class="tool-group">
-                    <button id="tool-rectangle" class="btn tool-btn" title="사각형"><i class="fas fa-square"></i> 사각형</button>
-                    <button id="tool-channel" class="btn tool-btn" title="채널"><i class="fas fa-arrows-alt-v"></i> 채널</button>
-                </div>
-
-                <div class="tool-group">
-                    <button id="tool-text" class="btn tool-btn" title="텍스트"><i class="fas fa-font"></i> 텍스트</button>
-                    <button id="tool-arrow" class="btn tool-btn" title="화살표"><i class="fas fa-arrow-right"></i> 화살표</button>
-                </div>
-
-                <div class="tool-group">
-                    <button id="undoBtn" class="btn" title="되돌리기"><i class="fas fa-undo"></i> 되돌리기</button>
-                    <button id="clearBtn" class="btn danger" title="모두 지우기"><i class="fas fa-trash"></i> 지우기</button>
+                    <button id="undoBtn" class="btn" title="되돌리기">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button id="clearBtn" class="btn danger" title="모두 지우기">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
             </div>
         </div>
-
-        <div id="chartDiv"></div>
-
+        
+        <div class="main-content">
+            <div class="chart-container">
+                <div id="chartDiv"></div>
+            </div>
+            
+            <div class="sidebar" id="sidebar">
+                <div class="performance-dashboard">
+                    <div class="dashboard-header">
+                        <i class="fas fa-chart-bar"></i>
+                        성과 대시보드
+                    </div>
+                    
+                    <div class="metric-grid" id="metricsGrid">
+                        <!-- 성과 지표들이 여기에 동적으로 추가됩니다 -->
+                    </div>
+                    
+                    <div class="trades-section">
+                        <div class="trades-header">
+                            <i class="fas fa-exchange-alt"></i>
+                            최근 거래 내역
+                        </div>
+                        <div id="tradesContainer">
+                            <!-- 거래 내역이 여기에 동적으로 추가됩니다 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="status-bar">
             <div id="coordinates">마우스를 차트에 올려보세요</div>
             <div id="tool-status">도구를 선택하여 분석을 시작하세요</div>
         </div>
     </div>
 
-    <div class="magnet-indicator" id="magnetIndicator"></div>
-
     <script>
+        // 전역 변수들
         const chartDiv = document.getElementById('chartDiv');
-        const toolButtons = document.querySelectorAll('.tool-btn');
-
-        let layout = {};
-        let chartData = {};
-        let data = [];
+        const sidebar = document.getElementById('sidebar');
+        const analysisResult = JSON.parse(localStorage.getItem('analysisResult'));
+        const chartData = analysisResult ? analysisResult.chart_data : null;
         
+        let layout, data;
         let isAIVisible = true;
+        let isSidebarVisible = true;
         let magnetEnabled = true;
         let currentTool = null;
         let drawingIdCounter = 0;
-        let relayoutTimeout = null;
-
+        
+        // 피보나치 레벨 및 색상
         const fiboLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-        const fiboExtLevels = [1, 1.236, 1.382, 1.5, 1.618, 2, 2.618];
         const fiboColors = ['#787878', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3', '#FF7F00', '#FFD700'];
 
-        async function initializeChart(symbol, modelName, period) {
-            const statusElement = document.getElementById('tool-status');
-            statusElement.textContent = `'${symbol}'에 대한 AI 분석 데이터를 불러오는 중입니다...`;
-            try {
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        symbol: symbol,
-                        model_name: modelName,
-                        period: period,
-                        initial_balance: 10000
-                    }),
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP 오류! 상태: ${response.status}`);
-                }
-
-                const analysisResult = await response.json();
-                if (analysisResult.error) throw new Error(analysisResult.error);
-
-                chartData = analysisResult.chart_data;
-                drawChart(analysisResult);
-
-            } catch (error) {
-                console.error('차트 초기화 오류:', error);
-                chartDiv.innerHTML = `<p style="padding: 20px; color: red;">차트 데이터를 불러오는 데 실패했습니다: ${error.message}</p>`;
+        function initializeApp() {
+            if (!chartData) {
+                chartDiv.innerHTML = `
+                    <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #e74c3c;">
+                        <div style="text-align: center;">
+                            <i class="fas fa-exclamation-triangle" style="font-size: 3rem; margin-bottom: 20px;"></i>
+                            <h3>차트 데이터를 찾을 수 없습니다</h3>
+                            <p>메인 페이지에서 먼저 분석을 실행해주세요.</p>
+                        </div>
+                    </div>
+                `;
+                return;
             }
+
+            setupPerformanceDashboard();
+            drawChart();
+            attachEventListeners();
         }
 
-        function drawChart(analysisResult) {
+        function setupPerformanceDashboard() {
+            // 타이틀 업데이트
+            document.getElementById('chartTitle').textContent = 
+                `${analysisResult.symbol} AI 거래 분석 (${analysisResult.period})`;
+            
+            // AI 추천 표시
+            if (analysisResult.todays_action) {
+                const recommendation = document.getElementById('aiRecommendation');
+                const recommendationText = document.getElementById('recommendationText');
+                
+                recommendationText.textContent = `오늘의 AI 추천: ${analysisResult.todays_action}`;
+                recommendation.style.display = 'flex';
+                
+                // 추천에 따라 색상 변경
+                const actionColors = {
+                    '강력매수': 'linear-gradient(45deg, #27ae60, #2ecc71)',
+                    '매수': 'linear-gradient(45deg, #3498db, #2980b9)',
+                    '보유': 'linear-gradient(45deg, #f39c12, #e67e22)',
+                    '매도': 'linear-gradient(45deg, #e74c3c, #c0392b)',
+                    '강력매도': 'linear-gradient(45deg, #8e44ad, #9b59b6)'
+                };
+                
+                recommendation.style.background = actionColors[analysisResult.todays_action] || 
+                    'linear-gradient(45deg, #95a5a6, #7f8c8d)';
+            }
+
+            // 성과 지표 카드들 생성
+            createMetricCards();
+            
+            // 거래 내역 표시
+            displayTradeHistory();
+        }
+
+        function createMetricCards() {
+            const metricsGrid = document.getElementById('metricsGrid');
+            const metrics = [
+                {
+                    label: '총 수익률',
+                    value: `${(analysisResult.total_return * 100).toFixed(2)}%`,
+                    className: analysisResult.total_return >= 0 ? 'positive' : 'negative'
+                },
+                {
+                    label: '벤치마크 대비',
+                    value: `${((analysisResult.total_return - analysisResult.benchmark_return) * 100).toFixed(2)}%`,
+                    className: (analysisResult.total_return - analysisResult.benchmark_return) >= 0 ? 'positive' : 'negative'
+                },
+                {
+                    label: '총 거래횟수',
+                    value: analysisResult.total_trades,
+                    className: 'neutral'
+                },
+                {
+                    label: '승률',
+                    value: analysisResult.win_rate ? `${(analysisResult.win_rate * 100).toFixed(1)}%` : 'N/A',
+                    className: analysisResult.win_rate > 0.5 ? 'positive' : 'negative'
+                },
+                {
+                    label: '최대 낙폭',
+                    value: analysisResult.max_drawdown ? `${(analysisResult.max_drawdown * 100).toFixed(2)}%` : 'N/A',
+                    className: 'negative'
+                },
+                {
+                    label: '샤프 비율',
+                    value: analysisResult.sharpe_ratio ? analysisResult.sharpe_ratio.toFixed(3) : 'N/A',
+                    className: analysisResult.sharpe_ratio > 1 ? 'positive' : 'neutral'
+                }
+            ];
+
+            metricsGrid.innerHTML = metrics.map(metric => `
+                <div class="metric-card">
+                    <div class="metric-value ${metric.className}">${metric.value}</div>
+                    <div class="metric-label">${metric.label}</div>
+                </div>
+            `).join('');
+        }
+
+        function displayTradeHistory() {
+            const tradesContainer = document.getElementById('tradesContainer');
+            
+            if (!chartData.trades || chartData.trades.length === 0) {
+                tradesContainer.innerHTML = `
+                    <div style="text-align: center; color: #6c757d; padding: 20px;">
+                        <i class="fas fa-info-circle"></i>
+                        <p>거래 내역이 없습니다</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // 최신 거래 10개만 표시
+            const recentTrades = chartData.trades.slice(-10).reverse();
+            
+            tradesContainer.innerHTML = recentTrades.map(trade => `
+                <div class="trade-item trade-${trade.type}">
+                    <div class="trade-date">${trade.date}</div>
+                    <div class="trade-details">
+                        <span class="trade-type ${trade.type === 'buy' ? 'positive' : 'negative'}">
+                            ${trade.type === 'buy' ? '매수' : '매도'}
+                        </span>
+                        <span class="trade-price">${trade.price.toFixed(2)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function drawChart() {
+            // 캔들스틱 차트
             const candlestickTrace = {
-                x: chartData.dates, open: chartData.open, high: chartData.high, low: chartData.low, close: chartData.close,
-                type: 'candlestick', name: '주가', xaxis: 'x', yaxis: 'y1'
+                x: chartData.dates,
+                open: chartData.open,
+                high: chartData.high,
+                low: chartData.low,
+                close: chartData.close,
+                type: 'candlestick',
+                name: '주가',
+                xaxis: 'x',
+                yaxis: 'y1'
             };
+
+            // AI 포트폴리오 성과
             const portfolioTrace = {
-                x: chartData.dates, y: chartData.portfolio, type: 'scatter', mode: 'lines', name: 'AI 전략',
-                line: { color: '#667eea', width: 2 }, xaxis: 'x', yaxis: 'y2'
+                x: chartData.dates,
+                y: chartData.portfolio,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'AI 전략',
+                line: { color: '#667eea', width: 3 },
+                xaxis: 'x',
+                yaxis: 'y2'
             };
+
+            // 벤치마크 (매수 후 보유)
             const benchmarkTrace = {
-                x: chartData.dates, y: chartData.benchmark, type: 'scatter', mode: 'lines', name: '벤치마크',
-                line: { color: '#f5a623', width: 2 }, xaxis: 'x', yaxis: 'y2'
+                x: chartData.dates,
+                y: chartData.benchmark,
+                type: 'scatter',
+                mode: 'lines',
+                name: '매수후보유',
+                line: { color: '#f5a623', width: 2, dash: 'dash' },
+                xaxis: 'x',
+                yaxis: 'y2'
             };
 
             layout = {
-                title: { text: `${analysisResult.symbol} 상세 분석 (${analysisResult.period} 기준)`, font: { size: 20, color: '#2c3e50' } },
-                xaxis: { domain: [0, 1], anchor: 'y2', rangeslider: { visible: false }, showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
-                yaxis: { domain: [0.3, 1], title: '주가', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
-                yaxis2: { domain: [0, 0.25], title: '포트폴리오 가치', showgrid: true, gridcolor: 'rgba(0,0,0,0.1)' },
-                shapes: [], annotations: [], dragmode: 'pan',
-                plot_bgcolor: 'rgba(255,255,255,0.9)', paper_bgcolor: 'rgba(255,255,255,0.9)',
-                margin: { t: 50, b: 50, l: 60, r: 60 }
+                title: {
+                    text: `${analysisResult.symbol} 상세 분석 결과`,
+                    font: { size: 18, color: '#2c3e50' }
+                },
+                xaxis: {
+                    domain: [0, 1],
+                    anchor: 'y2',
+                    rangeslider: { visible: false },
+                    showgrid: true,
+                    gridcolor: 'rgba(0,0,0,0.1)'
+                },
+                yaxis: {
+                    domain: [0.35, 1],
+                    title: '주가 ($)',
+                    showgrid: true,
+                    gridcolor: 'rgba(0,0,0,0.1)'
+                },
+                yaxis2: {
+                    domain: [0, 0.3],
+                    title: '포트폴리오 가치 ($)',
+                    showgrid: true,
+                    gridcolor: 'rgba(0,0,0,0.1)'
+                },
+                shapes: [],
+                annotations: [],
+                dragmode: 'pan',
+                plot_bgcolor: 'rgba(255,255,255,0.9)',
+                paper_bgcolor: 'rgba(255,255,255,0.9)',
+                margin: { t: 50, b: 50, l: 60, r: 60 },
+                legend: {
+                    orientation: 'h',
+                    x: 0,
+                    y: 1.02,
+                    bgcolor: 'rgba(255,255,255,0.8)'
+                }
             };
-            
-            if(chartData.trades) {
+
+            // 거래 마커 추가
+            if (chartData.trades) {
                 chartData.trades.forEach(trade => {
                     layout.annotations.push({
-                        name: 'trade_marker', // Name for easy identification
-                        x: trade.date, y: trade.price, xref: 'x', yref: 'y1', showarrow: true, arrowhead: trade.type === 'buy' ? 6 : 5, ax: 0, ay: trade.type === 'buy' ? -25 : 25,
-                        bordercolor: trade.type === 'buy' ? '#27ae60' : '#c0392b', bgcolor: trade.type === 'buy' ? 'rgba(46, 204, 113, 0.7)' : 'rgba(231, 76, 60, 0.7)',
-                        text: trade.type === 'buy' ? 'B' : 'S', font: {color: 'white'}
+                        name: 'trade_marker',
+                        x: trade.date,
+                        y: trade.price,
+                        xref: 'x',
+                        yref: 'y1',
+                        showarrow: true,
+                        arrowhead: trade.type === 'buy' ? 6 : 5,
+                        ax: 0,
+                        ay: trade.type === 'buy' ? -30 : 30,
+                        bordercolor: trade.type === 'buy' ? '#27ae60' : '#e74c3c',
+                        bgcolor: trade.type === 'buy' ? 'rgba(46, 204, 113, 0.8)' : 'rgba(231, 76, 60, 0.8)',
+                        text: trade.type === 'buy' ? 'B' : 'S',
+                        font: { color: 'white', size: 10 }
                     });
                 });
             }
 
             data = [candlestickTrace, portfolioTrace, benchmarkTrace];
-            Plotly.newPlot('chartDiv', data, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
-            attachEventListeners();
-            updateStatus();
+            
+            Plotly.newPlot('chartDiv', data, layout, {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+                modeBarButtonsToAdd: [{
+                    name: 'Reset view',
+                    icon: Plotly.Icons.home,
+                    click: function() {
+                        Plotly.relayout('chartDiv', {
+                            'xaxis.autorange': true,
+                            'yaxis.autorange': true,
+                            'yaxis2.autorange': true
+                        });
+                    }
+                }]
+            });
         }
 
         function attachEventListeners() {
+            // UI 버튼들
             const magnetBtn = document.getElementById('magnetBtn');
             const undoBtn = document.getElementById('undoBtn');
             const clearBtn = document.getElementById('clearBtn');
             const toggleAIBtn = document.getElementById('toggleAIBtn');
+            const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
             const rangeButtons = document.querySelectorAll('.range-btn');
+            const toolButtons = document.querySelectorAll('.tool-btn');
 
+            // 자석 기능 토글
             magnetBtn.addEventListener('click', () => {
                 magnetEnabled = !magnetEnabled;
                 magnetBtn.classList.toggle('active', magnetEnabled);
                 updateStatus();
             });
 
+            // AI 분석 표시/숨김
             toggleAIBtn.addEventListener('click', () => {
                 isAIVisible = !isAIVisible;
                 toggleAIBtn.classList.toggle('active', isAIVisible);
+                
+                // 포트폴리오와 벤치마크 라인 토글
                 Plotly.restyle('chartDiv', { visible: isAIVisible }, [1, 2]);
+                
+                // 거래 마커 토글
                 const annotationUpdates = {};
                 layout.annotations.forEach((ann, i) => {
                     if (ann.name === 'trade_marker') {
                         annotationUpdates[`annotations[${i}].visible`] = isAIVisible;
                     }
                 });
-                if(Object.keys(annotationUpdates).length > 0) {
+                if (Object.keys(annotationUpdates).length > 0) {
                     Plotly.relayout('chartDiv', annotationUpdates);
                 }
             });
 
+            // 사이드바 토글
+            toggleSidebarBtn.addEventListener('click', () => {
+                isSidebarVisible = !isSidebarVisible;
+                toggleSidebarBtn.classList.toggle('active', isSidebarVisible);
+                sidebar.style.display = isSidebarVisible ? 'block' : 'none';
+            });
+
+            // 기간 선택 버튼들
             rangeButtons.forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     rangeButtons.forEach(b => b.classList.remove('active'));
                     e.currentTarget.classList.add('active');
+                    
                     const range = e.currentTarget.dataset.range;
                     const endDate = new Date(chartData.dates[chartData.dates.length - 1]);
                     let startDate = new Date(chartData.dates[0]);
+                    
                     if (range !== 'all') {
                         startDate = new Date(endDate);
                         if (range === '1m') startDate.setMonth(startDate.getMonth() - 1);
@@ -324,175 +659,334 @@
                         else if (range === '6m') startDate.setMonth(startDate.getMonth() - 6);
                         else if (range === '1y') startDate.setFullYear(startDate.getFullYear() - 1);
                     }
+                    
                     Plotly.relayout('chartDiv', {
                         'xaxis.range': [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
                     });
                 });
             });
 
-            toolButtons.forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.id.split('-').slice(1).join('-'))));
-            
+            // 그리기 도구들
+            toolButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const toolName = btn.id.split('-').slice(1).join('-');
+                    setActiveTool(toolName);
+                });
+            });
+
+            // 지우기 및 되돌리기
             clearBtn.addEventListener('click', () => {
                 layout.shapes = layout.shapes.filter(s => s.drawing_id === undefined);
-                layout.annotations = layout.annotations.filter(a => a.drawing_id === undefined && a.name !== 'trade_marker');
+                layout.annotations = layout.annotations.filter(a => 
+                    a.drawing_id === undefined && a.name !== 'trade_marker'
+                );
                 Plotly.react('chartDiv', data, layout);
             });
 
             undoBtn.addEventListener('click', () => {
-                const lastDrawingIdNum = Math.max(0, ...layout.shapes.map(s => parseInt(s.drawing_id?.split('-')[1] || 0)), ...layout.annotations.map(a => a.drawing_id?.split('-')[1] || 0));
+                const lastDrawingIdNum = Math.max(0, 
+                    ...layout.shapes.map(s => parseInt(s.drawing_id?.split('-')[1] || 0)),
+                    ...layout.annotations.map(a => parseInt(a.drawing_id?.split('-')[1] || 0))
+                );
+                
                 if (lastDrawingIdNum > 0) {
                     const drawingId = `drawing-${lastDrawingIdNum}`;
                     layout.shapes = layout.shapes.filter(s => s.drawing_id !== drawingId);
-                    layout.annotations = layout.annotations.filter(a => a.drawing_id !== drawingId);
-                } else {
-                    if (layout.shapes.length > 0) layout.shapes.pop();
-                    else if (layout.annotations.length > 0) layout.annotations.pop();
+                    layout.annotations = layout.annotations.filter(a => s.drawing_id !== drawingId);
+                } else if (layout.shapes.length > 0) {
+                    layout.shapes.pop();
                 }
+                
                 Plotly.react('chartDiv', data, layout);
             });
 
-            chartDiv.on('plotly_relayout', (eventData) => {
-                clearTimeout(relayoutTimeout);
-                const isShapeEdit = Object.keys(eventData).some(k => k.startsWith('shapes['));
+            // Plotly 이벤트 리스너들
+            setupPlotlyEvents();
+        }
 
-                if (currentTool) { // New shape creation
-                    const lastShape = layout.shapes[layout.shapes.length - 1];
-                    if (!lastShape) return;
-                    const drawingId = `drawing-${drawingIdCounter++}`;
-                    if (magnetEnabled) {
-                        const snappedStart = findNearestCandlePoint(lastShape.x0, lastShape.y0);
-                        const snappedEnd = findNearestCandlePoint(lastShape.x1, lastShape.y1);
-                        lastShape.x0 = snappedStart.x; lastShape.y0 = snappedStart.y;
-                        lastShape.x1 = snappedEnd.x; lastShape.y1 = snappedEnd.y;
-                    }
+        function setupPlotlyEvents() {
+            // 차트 호버 이벤트
+            chartDiv.on('plotly_hover', (eventData) => {
+                const point = eventData.points[0];
+                let priceText = '';
+                
+                if (point.close !== undefined) {
+                    priceText = `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}`;
+                } else if (point.y !== undefined) {
+                    priceText = point.y.toFixed(2);
+                }
+                
+                document.getElementById('coordinates').innerHTML = `
+                    <strong>날짜:</strong> ${point.x} | <strong>가격:</strong> ${priceText}
+                    ${magnetEnabled ? ' | <span style="color: #27ae60;">🧲 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}
+                `;
+            });
+
+            chartDiv.on('plotly_unhover', () => {
+                document.getElementById('coordinates').innerHTML = `
+                    마우스를 차트에 올려보세요 
+                    ${magnetEnabled ? ' | <span style="color: #27ae60;">🧲 자석 ON</span>' : ' | <span style="color: #95a5a6;">자석 OFF</span>'}
+                `;
+            });
+
+            // 그리기 이벤트 (기존과 동일한 로직)
+            chartDiv.on('plotly_relayout', handleDrawingEvents);
+        }
+
+        function handleDrawingEvents(eventData) {
+            // 그리기 도구 이벤트 처리 로직
+            if (currentTool && (eventData['shapes[0].x0'] !== undefined || 
+                (eventData.shapes && eventData.shapes.length > layout.shapes.length))) {
+                
+                const drawingId = `drawing-${drawingIdCounter++}`;
+                const lastShape = layout.shapes[layout.shapes.length - 1];
+                
+                if (lastShape && magnetEnabled) {
+                    // 자석 기능 적용
+                    const snappedStart = findNearestCandlePoint(lastShape.x0, lastShape.y0);
+                    const snappedEnd = findNearestCandlePoint(lastShape.x1, lastShape.y1);
+                    
+                    lastShape.x0 = snappedStart.x;
+                    lastShape.y0 = snappedStart.y;
+                    lastShape.x1 = snappedEnd.x;
+                    lastShape.y1 = snappedEnd.y;
+                }
+                
+                if (lastShape) {
                     lastShape.drawing_id = drawingId;
                     lastShape.editable = true;
+                    
+                    // 도구별 스타일 적용
                     switch(currentTool) {
-                        case 'trendline': lastShape.name = 'trendline'; lastShape.line = { color: '#0066cc', width: 2 }; break;
-                        case 'horizontal': lastShape.name = 'horizontal'; lastShape.y1 = lastShape.y0; lastShape.line = { color: '#ff6b6b', width: 2 }; break;
-                        case 'vertical': lastShape.name = 'vertical'; lastShape.x1 = lastShape.x0; lastShape.line = { color: '#4ecdc4', width: 2 }; break;
-                        case 'rectangle': lastShape.name = 'rectangle'; lastShape.line = { color: '#45b7d1', width: 2 }; lastShape.fillcolor = 'rgba(69, 183, 209, 0.1)'; break;
-                        case 'fibonacci': case 'fibonacci-ext':
-                            lastShape.name = currentTool === 'fibonacci' ? 'fib_bg' : 'fib_ext_bg';
+                        case 'trendline':
+                            lastShape.name = 'trendline';
+                            lastShape.line = { color: '#0066cc', width: 2 };
+                            break;
+                        case 'horizontal':
+                            lastShape.name = 'horizontal';
+                            lastShape.y1 = lastShape.y0;
+                            lastShape.line = { color: '#ff6b6b', width: 2 };
+                            break;
+                        case 'fibonacci':
+                            lastShape.name = 'fib_bg';
                             lastShape.fillcolor = 'rgba(102, 126, 234, 0.1)';
                             lastShape.line = { width: 0 };
-                            createFibonacci(lastShape, drawingId, currentTool === 'fibonacci-ext');
+                            createFibonacciLevels(lastShape, drawingId);
                             break;
                     }
-                    setActiveTool(currentTool);
+                    
+                    setActiveTool(currentTool); // 도구 비활성화
                     Plotly.react('chartDiv', data, layout);
-                } else if (isShapeEdit) { // Existing shape edited
-                    relayoutTimeout = setTimeout(() => {
-                        const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
-                        if (!shapeKey) return;
-                        const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
-                        const editedShape = layout.shapes[shapeIndex];
-                        if (editedShape && editedShape.editable) {
-                            if (magnetEnabled) {
-                                const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
-                                const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
-                                editedShape.x0 = snappedStart.x; editedShape.y0 = snappedStart.y;
-                                editedShape.x1 = snappedEnd.x; editedShape.y1 = snappedEnd.y;
-                            }
-                            if (editedShape.name === 'fib_bg' || editedShape.name === 'fib_ext_bg') {
-                                layout.shapes = layout.shapes.filter(s => s.drawing_id !== editedShape.drawing_id || s.name === editedShape.name);
-                                layout.annotations = layout.annotations.filter(a => a.drawing_id !== editedShape.drawing_id);
-                                createFibonacci(editedShape, editedShape.drawing_id, editedShape.name === 'fib_ext_bg');
-                            }
-                            Plotly.react('chartDiv', data, layout);
-                        }
-                    }, 150);
                 }
-            });
-
-            chartDiv.on('plotly_hover', (e) => {
-                const point = e.points[0];
-                const priceText = point.close !== undefined ? `O:${point.open.toFixed(2)} H:${point.high.toFixed(2)} L:${point.low.toFixed(2)} C:${point.close.toFixed(2)}` : (point.y !== undefined ? point.y.toFixed(2) : '');
-                coordinatesElement.innerHTML = `<strong>날짜:</strong> ${point.x} | <strong>가격:</strong> ${priceText}`;
-            });
-            chartDiv.on('plotly_unhover', () => { coordinatesElement.innerHTML = '마우스를 차트에 올려보세요'; });
-            chartDiv.on('plotly_click', (e) => {
-                if (currentTool === 'text' && e.points.length > 0) {
-                    let point = e.points[0];
-                    if (magnetEnabled) {
-                        const snapped = findNearestCandlePoint(point.x, point.y);
-                        if (snapped.snapped) point = { x: snapped.x, y: snapped.y };
+            }
+            
+            // 기존 도형 편집 시 자석 적용
+            else if (Object.keys(eventData).some(k => k.startsWith('shapes['))) {
+                const shapeKey = Object.keys(eventData).find(k => k.startsWith('shapes['));
+                const shapeIndex = parseInt(shapeKey.match(/\d+/)[0]);
+                const editedShape = layout.shapes[shapeIndex];
+                
+                if (editedShape && editedShape.editable && magnetEnabled) {
+                    const snappedStart = findNearestCandlePoint(editedShape.x0, editedShape.y0);
+                    const snappedEnd = findNearestCandlePoint(editedShape.x1, editedShape.y1);
+                    
+                    editedShape.x0 = snappedStart.x;
+                    editedShape.y0 = snappedStart.y;
+                    editedShape.x1 = snappedEnd.x;
+                    editedShape.y1 = snappedEnd.y;
+                    
+                    // 피보나치 업데이트
+                    if (editedShape.name === 'fib_bg') {
+                        layout.shapes = layout.shapes.filter(s => 
+                            s.drawing_id !== editedShape.drawing_id || s.name === editedShape.name
+                        );
+                        layout.annotations = layout.annotations.filter(a => 
+                            a.drawing_id !== editedShape.drawing_id
+                        );
+                        createFibonacciLevels(editedShape, editedShape.drawing_id);
                     }
-                    const text = prompt('추가할 텍스트를 입력하세요:', '분석 메모');
-                    if (text) {
-                        const drawingId = `drawing-${drawingIdCounter++}`;
-                        layout.annotations.push({ x: point.x, y: point.y, text: text, showarrow: true, arrowhead: 2, arrowsize: 1, arrowwidth: 2, arrowcolor: '#667eea', font: { size: 12, color: '#2c3e50' }, bgcolor: 'rgba(255,255,255,0.8)', bordercolor: '#667eea', borderwidth: 2, borderpad: 4, name: 'text_annotation', drawing_id: drawingId, editable: true });
-                        setActiveTool(currentTool);
-                        Plotly.react('chartDiv', data, layout);
-                    }
+                    
+                    Plotly.react('chartDiv', data, layout);
                 }
-            });
-            document.addEventListener('keydown', (e) => {
-                if (e.ctrlKey || e.metaKey) {
-                    if (e.key === 'z') { e.preventDefault(); undoBtn.click(); }
-                    if (e.key === 'm') { e.preventDefault(); magnetBtn.click(); }
-                }
-                if (e.key === 'Escape') setActiveTool(null);
-            });
-            window.addEventListener('resize', () => Plotly.Plots.resize(chartDiv));
+            }
         }
 
         function findNearestCandlePoint(x, y) {
             if (!magnetEnabled || !chartData.dates) return { x, y, snapped: false };
-            let closestDateIndex = 0, minDistance = Infinity;
+            
+            // 가장 가까운 날짜 찾기
+            let closestDateIndex = 0;
+            let minDistance = Infinity;
+            
             chartData.dates.forEach((date, index) => {
                 const distance = Math.abs(new Date(x).getTime() - new Date(date).getTime());
-                if (distance < minDistance) { minDistance = distance; closestDateIndex = index; }
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestDateIndex = index;
+                }
             });
-            const ohlcPrices = [chartData.open[closestDateIndex], chartData.high[closestDateIndex], chartData.low[closestDateIndex], chartData.close[closestDateIndex]];
-            let closestPrice = ohlcPrices[0], minPriceDistance = Math.abs(closestPrice - y);
+            
+            // OHLC 포인트 찾기
+            const ohlcPrices = [
+                chartData.open[closestDateIndex],
+                chartData.high[closestDateIndex],
+                chartData.low[closestDateIndex],
+                chartData.close[closestDateIndex]
+            ];
+            
+            let closestPrice = ohlcPrices[0];
+            let minPriceDistance = Math.abs(closestPrice - y);
+            
             ohlcPrices.forEach(price => {
                 const distance = Math.abs(price - y);
-                if (distance < minPriceDistance) { minPriceDistance = distance; closestPrice = price; }
+                if (distance < minPriceDistance) {
+                    minPriceDistance = distance;
+                    closestPrice = price;
+                }
             });
-            return { x: chartData.dates[closestDateIndex], y: closestPrice, snapped: true };
+            
+            return {
+                x: chartData.dates[closestDateIndex],
+                y: closestPrice,
+                snapped: true
+            };
+        }
+
+        function createFibonacciLevels(rect, drawingId) {
+            const y_start = Math.min(rect.y0, rect.y1);
+            const y_end = Math.max(rect.y0, rect.y1);
+            const y_diff = y_end - y_start;
+            const descending = rect.y0 > rect.y1;
+            
+            fiboLevels.forEach((level, i) => {
+                const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
+                
+                layout.shapes.push({
+                    type: 'line',
+                    x0: rect.x0,
+                    y0: level_y,
+                    x1: rect.x1,
+                    y1: level_y,
+                    line: { 
+                        color: fiboColors[i % fiboColors.length], 
+                        width: 1, 
+                        dash: level === 0 || level === 1 ? 'solid' : 'dot' 
+                    },
+                    name: 'fib_line',
+                    drawing_id: drawingId,
+                    editable: false
+                });
+                
+                layout.annotations.push({
+                    x: rect.x1,
+                    y: level_y,
+                    text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`,
+                    showarrow: false,
+                    font: { color: fiboColors[i % fiboColors.length], size: 10 },
+                    xanchor: 'left',
+                    yanchor: 'middle',
+                    name: 'fib_annotation',
+                    drawing_id: drawingId
+                });
+            });
         }
 
         function setActiveTool(toolName) {
             currentTool = (currentTool === toolName) ? null : toolName;
-            toolButtons.forEach(btn => btn.classList.toggle('active', btn.id === `tool-${currentTool}`));
+            
+            const toolButtons = document.querySelectorAll('.tool-btn');
+            toolButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.id === `tool-${currentTool}`);
+            });
+            
             let dragmode = 'pan';
-            if (['trendline', 'horizontal', 'vertical', 'arrow'].includes(currentTool)) dragmode = 'drawline';
-            else if (['rectangle', 'fibonacci', 'fibonacci-ext', 'channel'].includes(currentTool)) dragmode = 'drawrect';
+            if (['trendline', 'horizontal'].includes(currentTool)) {
+                dragmode = 'drawline';
+            } else if (['fibonacci'].includes(currentTool)) {
+                dragmode = 'drawrect';
+            }
+            
             layout.dragmode = dragmode;
             Plotly.relayout('chartDiv', { dragmode: dragmode });
+            
             updateStatus();
         }
 
         function updateStatus() {
             const statusElement = document.getElementById('tool-status');
-            const magnetStatus = magnetEnabled ? ' (🧲 자석 ON)' : ' (자석 OFF)';
-            const messages = { null: '도구를 선택하여 분석을 시작하세요' + magnetStatus, 'trendline': '두 점을 클릭하여 추세선을 그으세요' + magnetStatus, 'horizontal': '수평선을 그을 위치를 클릭하세요' + magnetStatus, 'vertical': '수직선을 그을 위치를 클릭하세요' + magnetStatus, 'fibonacci': '드래그하여 피보나치 되돌림 영역을 설정하세요' + magnetStatus, 'fibonacci-ext': '드래그하여 피보나치 확장 영역을 설정하세요' + magnetStatus, 'rectangle': '드래그하여 사각형을 그으세요' + magnetStatus, 'channel': '드래그하여 채널을 설정하세요' + magnetStatus, 'text': '텍스트를 추가할 위치를 클릭하세요' + magnetStatus, 'arrow': '드래그하여 화살표를 그으세요' + magnetStatus };
+            const magnetStatus = magnetEnabled ? ' (자석 ON)' : ' (자석 OFF)';
+            
+            const messages = {
+                null: '도구를 선택하여 분석을 시작하세요' + magnetStatus,
+                'trendline': '추세선을 그으세요' + magnetStatus,
+                'horizontal': '수평선을 그으세요' + magnetStatus,
+                'fibonacci': '피보나치 영역을 드래그하세요' + magnetStatus
+            };
+            
             statusElement.textContent = messages[currentTool] || messages.null;
         }
 
-        function createFibonacci(rect, drawingId, isExtension) {
-            const levels = isExtension ? fiboExtLevels : fiboLevels;
-            const name_prefix = isExtension ? 'fib_ext' : 'fib';
-            const y_start = Math.min(rect.y0, rect.y1);
-            const y_end = Math.max(rect.y0, rect.y1);
-            const y_diff = y_end - y_start;
-            const descending = rect.y0 > rect.y1;
-            levels.forEach((level, i) => {
-                const level_y = descending ? y_end - y_diff * level : y_start + y_diff * level;
-                layout.shapes.push({ type: 'line', x0: rect.x0, y0: level_y, x1: rect.x1, y1: level_y, line: { color: fiboColors[i % fiboColors.length], width: 1, dash: level === 0 || level === 1 ? 'solid' : 'dot' }, name: `${name_prefix}_line`, drawing_id: drawingId, editable: false });
-                layout.annotations.push({ x: rect.x1, y: level_y, text: `${(level * 100).toFixed(1)}% (${level_y.toFixed(2)})`, showarrow: false, font: { color: fiboColors[i % fiboColors.length], size: 10 }, xanchor: 'left', yanchor: 'middle', name: `${name_prefix}_annotation`, drawing_id: drawingId });
-            });
-        }
-
-        // On page load, parse URL parameters and initialize the chart
-        window.addEventListener('DOMContentLoaded', () => {
-            const params = new URLSearchParams(window.location.search);
-            const symbol = params.get('symbol') || 'AAPL'; // Default to AAPL if not provided
-            const modelName = params.get('model') || 'AAPL_ppo_20250911_001207.zip'; // Default model
-            const period = params.get('period') || '2y'; // Default period
-
-            initializeChart(symbol, modelName, period);
+        // 키보드 단축키
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'z':
+                        e.preventDefault();
+                        document.getElementById('undoBtn').click();
+                        break;
+                    case 'm':
+                        e.preventDefault();
+                        document.getElementById('magnetBtn').click();
+                        break;
+                }
+            }
+            
+            if (e.key === 'Escape') {
+                setActiveTool(null);
+            }
         });
 
+        // 반응형 처리
+        function handleResize() {
+            Plotly.Plots.resize(chartDiv);
+        }
+
+        window.addEventListener('resize', handleResize);
+
+        // 앱 초기화
+        initializeApp();
     </script>
+</body>
+</html><!-- chart.html - 개선된 차트 시각화 페이지
+주요 개선사항:
+1. 성과 지표 대시보드 추가 (승률, 샤프 비율, 최대 낙폭 등)
+2. 거래 내역 상세 표시
+3. AI 추천 액션 강조 표시
+4. 개선된 자석 기능 (5단계 액션 대응)
+5. 반응형 레이아웃 및 향상된 UI/UX
+-->
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 주식 거래 분석 - 고급 차트</title>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100vh; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow-x: hidden;
+        }
+        .container { 
+            width: 100%; min-height: 100vh; 
+            display: flex; flex-direction: column; 
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .header { 
+            padding: 15px 20px; 
+            backgroun

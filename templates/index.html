@@ -615,6 +615,15 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="strategySelect">AI 전략 스타일</label>
+                            <select id="strategySelect" class="form-control">
+                                <option value="balanced" selected>균형형 (Balanced)</option>
+                                <option value="conservative">안정형 (Conservative)</option>
+                                <option value="aggressive">공격형 (Aggressive)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
                             <label for="trainModelName">모델 이름 지정</label>
                             <input type="text" id="trainModelName" class="form-control" placeholder="예: my_first_model" required>
                         </div>
@@ -632,6 +641,9 @@
 
                 <div id="trainingLogContainer" class="training-log-container" style="display: none;">
                     <h4>훈련 로그</h4>
+                    <div class="progress-bar-container" style="width: 100%; background-color: #e0e0e0; border-radius: 5px; margin-bottom: 10px;">
+                        <div id="trainingProgressBar" style="width: 0%; height: 20px; background-color: #4caf50; border-radius: 5px; text-align: center; color: white; line-height: 20px;">0%</div>
+                    </div>
                     <div id="trainingLog"></div>
                 </div>
 
@@ -763,7 +775,7 @@
                 resultsContainer.style.display = 'block';
 
                 try {
-                    const response = await fetch(`/search_korean_stock?query=${encodeURIComponent(query)}`);
+                    const response = await fetch(`/api/search_us_stock?query=${encodeURIComponent(query)}`);
                     const results = await response.json();
                     
                     resultsContainer.innerHTML = '';
@@ -805,15 +817,21 @@
                 { label: '최종 자산', value: formatCurrency(result.final_balance), isPositive: result.final_balance > result.initial_balance },
                 { label: 'AI 총 수익률', value: formatPercent(result.total_return), isPositive: result.total_return > 0 },
                 { label: '벤치마크 수익률', value: formatPercent(result.benchmark_return), isPositive: result.benchmark_return > 0 },
-                { label: '총 거래 횟수', value: result.total_trades }
+                { label: '총 거래 횟수', value: result.total_trades },
+                { label: '오늘의 AI 추천', value: result.todays_action, isAction: true, action: result.todays_action }
             ];
 
             metrics.forEach(metric => {
+                if (!metric.value) return; // Don't display card if value is missing
                 const card = document.createElement('div');
                 card.className = 'metric-card';
                 let valueClass = 'value';
                 if (metric.isPositive === true) valueClass += ' positive';
                 if (metric.isPositive === false) valueClass += ' negative';
+                if (metric.isAction) {
+                    if (metric.action === '매수') valueClass += ' positive';
+                    else if (metric.action === '매도') valueClass += ' negative';
+                }
                 
                 card.innerHTML = `
                     <h3>${metric.label}</h3>
@@ -828,6 +846,7 @@
                 chartBtn.className = 'btn btn-secondary';
                 chartBtn.innerHTML = '<i class="fas fa-chart-area"></i> 상세 차트 보기';
                 chartBtn.onclick = () => {
+                    // localStorage에 차트 데이터를 저장하고 새 탭에서 차트 페이지를 엽니다.
                     localStorage.setItem('chartData', JSON.stringify(result.chart_data));
                     window.open('/chart', '_blank');
                 };
@@ -842,7 +861,6 @@
             
             document.getElementById('symbolSearchBtn').addEventListener('click', searchSymbols);
             document.getElementById('symbolSearch').addEventListener('keyup', (e) => {
-                // Trigger search on key up, debounced in the function
                 searchSymbols();
             });
 
@@ -880,6 +898,8 @@
                         throw new Error(result.error || '분석 중 오류가 발생했습니다.');
                     }
                     
+                    // 분석 결과를 localStorage에 저장
+                    localStorage.setItem('analysisResult', JSON.stringify(result));
                     displaySingleResult(result);
 
                 } catch (err) {
@@ -904,12 +924,14 @@
 
                 const payload = {
                     symbol: document.getElementById('trainSymbol').value,
-                    period: document.getElementById('trainPeriod').value
+                    period: document.getElementById('trainPeriod').value,
+                    model_name: document.getElementById('trainModelName').value,
+                    strategy: document.getElementById('strategySelect').value // 전략 값 추가
                 };
                 
-                if (!payload.symbol) {
+                if (!payload.symbol || !payload.model_name) {
                     button.disabled = false;
-                    return showMessage('훈련할 종목 코드를 입력해주세요.');
+                    return showMessage('훈련할 종목 코드와 모델 이름을 모두 입력해주세요.');
                 }
 
                 try {
@@ -936,6 +958,11 @@
                         lines.forEach(line => {
                             try {
                                 const data = JSON.parse(line);
+                                const progressBar = document.getElementById('trainingProgressBar');
+                                if (data.status === 'progress_update') {
+                                    progressBar.style.width = `${data.percentage}%`;
+                                    progressBar.textContent = `${data.percentage}%`;
+                                }
                                 const logEntry = document.createElement('div');
                                 logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${data.message}`;
                                 if (data.status === 'error') {
