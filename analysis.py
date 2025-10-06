@@ -436,9 +436,31 @@ class StockAnalyzer:
             returns = pd.Series(portfolio_history).pct_change().dropna()
             sharpe_ratio = returns.mean() / returns.std() if returns.std() > 0 else 0
 
-            # 오늘의 추천 (마지막 상태 기준)
-            todays_action_code, _ = self.model.predict(obs, deterministic=True)
-            action_map = {0: '강력매도', 1: '매도', 2: '보유', 3: '매수', 4: '강력매수'}
+            # --- 오늘의 추천 (신규 투자자 관점) 로직 ---
+            # 마지막 관측 상태를 복사하여 포트폴리오 부분만 수정
+            recommendation_obs = obs.copy()
+            
+            # 포트폴리오 상태를 초기 상태(현금 100%, 주식 0%)로 가정
+            # 관측 공간에서 포트폴리오 피쳐의 인덱스: 19부터 9개
+            # [현금비율, 주식보유비율, 총자산비율, 마지막액션, 연속보유, 총거래, 드로우다운, 승률, 패률]
+            new_investor_portfolio_features = np.array([
+                1.0,  # 현금 100%
+                0.0,  # 주식 0%
+                1.0,  # 총 자산은 초기 자본과 동일
+                0.5,  # 마지막 액션: 중립(보유)
+                0.0,  # 연속 보유 기간 0
+                0.0,  # 총 거래 0
+                0.0,  # 드로우다운 0
+                0.0,  # 승률 0
+                0.0   # 패률 0
+            ])
+            recommendation_obs[19:28] = new_investor_portfolio_features
+
+            # 신규 투자자 관점에서의 행동 예측
+            todays_action_code, _ = self.model.predict(recommendation_obs, deterministic=True)
+            
+            # 신규 투자자에게 더 친화적인 추천으로 변환
+            action_map = {0: '관망', 1: '관망', 2: '관망', 3: '매수', 4: '강력매수'}
             todays_action = action_map.get(todays_action_code.item(), '알 수 없음')
 
             # 차트 데이터 준비
