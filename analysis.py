@@ -66,8 +66,6 @@ class ImprovedStockTradingEnv(gym.Env):
         self.drawdown = 0.0
         self.winning_trades = 0
         self.losing_trades = 0
-        self.last_trade_price = 0
-
         return self._get_observation(), self._get_info()
 
     def _get_observation(self):
@@ -177,6 +175,9 @@ class ImprovedStockTradingEnv(gym.Env):
                 portfolio_features,  # 9개
                 market_features  # 2개
             ])
+
+            # 최종 관측값에서 NaN, inf를 0으로 대체하여 안정성 확보
+            observation = np.nan_to_num(observation, nan=0.0, posinf=0.0, neginf=0.0)
 
             return observation.astype(np.float32)
 
@@ -323,7 +324,7 @@ class StockAnalyzer:
     """개선된 주식 분석 클래스"""
 
     def __init__(self):
-        self.models_dir = "models"
+        self.models_dir = "D:\\StockModelFolder"
         self.model = None
         self.scaler = None
 

@@ -172,7 +172,7 @@ def train_model_route():
         user_id = current_user.get_id()
 
         # 입력값 검증
-        valid_periods = ['3m', '6m', '1y', '2y', '5y']
+        valid_periods = ['3m', '6m', '1y', '2y', '5y', '10y']
         if period not in valid_periods:
             return jsonify({
                 "status": "error",
@@ -304,7 +304,7 @@ def get_models():
     """사용자 모델 목록 조회 API"""
     try:
         user_id = current_user.get_id()
-        user_models_path = os.path.join(os.path.dirname(__file__), 'models', user_id)
+        user_models_path = os.path.join("D:\\", "StockModelFolder", user_id)
 
         if not os.path.exists(user_models_path):
             logger.info(f"모델 디렉토리가 존재하지 않음: {user_models_path}")

@@ -11,61 +11,56 @@ import numpy as np
 import logging
 from datetime import datetime, timedelta
 import warnings
+import gymnasium as gym
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
 
 def download_stock_data(symbol, period='1y', start_date=None, end_date=None):
-    """개선된 주식 데이터 다운로드 함수"""
+    """개선된 주식 데이터 다운로드 함수 (버퍼 추가)"""
     try:
-        # 기간 설정
+        end = datetime.now()
+        # 기간을 날짜로 변환
         if start_date and end_date:
             start = pd.to_datetime(start_date)
-            end = pd.to_datetime(end_date)
         else:
-            end = datetime.now()
-            if period == '3m':
-                start = end - timedelta(days=90)
-            elif period == '6m':
-                start = end - timedelta(days=180)
-            elif period == '1y':
+            num = int("".join(filter(str.isdigit, period)) or "1")
+            if 'y' in period:
+                start = end - timedelta(days=num * 365)
+            elif 'mo' in period:
+                start = end - timedelta(days=num * 30)
+            else: # 기본값
                 start = end - timedelta(days=365)
-            elif period == '2y':
-                start = end - timedelta(days=730)
-            elif period == '5y':
-                start = end - timedelta(days=1825)
-            else:
-                start = end - timedelta(days=365)
+
+        # 기술적 지표 계산을 위한 250일 버퍼 추가
+        buffer_start = start - timedelta(days=250)
 
         # yfinance를 통한 데이터 다운로드
         ticker = yf.Ticker(symbol)
-        df = ticker.history(start=start, end=end)
+        df = ticker.history(start=buffer_start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'))
 
         if df.empty:
             logger.error(f"데이터를 찾을 수 없습니다: {symbol}")
-            return None
+            return None, None
 
         # 데이터 정제
         df = df.reset_index()
         df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Dividends', 'Stock Splits']
-
-        # 필수 컬럼만 유지
         df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-
-        # 데이터 품질 검증
         df = validate_and_clean_data(df)
 
         if len(df) < 30:
             logger.error(f"유효한 데이터가 너무 적습니다: {len(df)}일")
-            return None
+            return None, None
 
-        logger.info(f"데이터 다운로드 완료: {symbol}, {len(df)}일 데이터")
-        return df
+        logger.info(f"데이터 다운로드 및 전처리 완료: {symbol}, {len(df)}일 데이터")
+        # 전체 버퍼 데이터프레임과, 사용자가 원했던 실제 시작 날짜를 함께 반환
+        return df, start
 
     except Exception as e:
         logger.error(f"데이터 다운로드 오류 ({symbol}): {e}")
-        return None
+        return None, None
 
 
 def validate_and_clean_data(df):
@@ -199,6 +194,13 @@ def add_advanced_technical_indicators(df):
         df['ADX'] = calculate_adx(df, 14)
 
         logger.info("고급 기술적 지표 추가 완료")
+        
+        # 최종 데이터 정제 (inf, NaN 처리)
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df.fillna(method='ffill', inplace=True)
+        df.fillna(method='bfill', inplace=True)
+        df.fillna(0, inplace=True)
+
         return df
 
     except Exception as e:
@@ -355,9 +357,25 @@ def add_market_regime_indicators(df):
         # 거래량 체계
         if 'Volume' in df.columns:
             df['Volume_Regime'] = np.where(df['Volume'] > df['Volume'].rolling(20).mean(), 1, 0)
-
+        
         return df
 
     except Exception as e:
         logger.error(f"시장 상황 지표 추가 오류: {e}")
         return df
+
+
+class ResetFixWrapper(gym.Wrapper):
+    """
+    A wrapper to fix an issue where the environment's reset method returns more values than expected.
+    This wrapper ensures that reset() returns only the first two values (obs, info).
+    """
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self, **kwargs):
+        reset_returns = self.env.reset(**kwargs)
+        return reset_returns[0], reset_returns[1]
+
+    def step(self, action):
+        return self.env.step(action)

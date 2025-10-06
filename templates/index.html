@@ -604,15 +604,7 @@
                             <input type="text" id="trainSymbol" class="form-control" placeholder="AAPL, GOOGL..." required>
                         </div>
 
-                        <div class="form-group">
-                            <label for="trainPeriod">훈련 데이터 기간</label>
-                            <select id="trainPeriod" class="form-control">
-                                <option value="1y" selected>1년</option>
-                                <option value="2y">2년</option>
-                                <option value="5y">5년</option>
-                                <option value="10y">10년</option>
-                            </select>
-                        </div>
+
 
                         <div class="form-group">
                             <label for="strategySelect">AI 전략 스타일</label>
@@ -928,7 +920,7 @@
 
                 const payload = {
                     symbol: document.getElementById('trainSymbol').value,
-                    period: document.getElementById('trainPeriod').value,
+                    period: '10y', // 기간 고정
                     model_name: document.getElementById('trainModelName').value,
                     strategy: document.getElementById('strategySelect').value // 전략 값 추가
                 };
