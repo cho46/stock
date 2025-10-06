@@ -358,7 +358,7 @@ class StockAnalyzer:
     def analyze_stock(self, symbol: str, period: str, initial_balance: float, **kwargs) -> Dict:
         """개선된 주식 분석을 실행합니다."""
         try:
-            df_original = download_stock_data(symbol, period, kwargs.get('start_date'), kwargs.get('end_date'))
+            df_original, _ = download_stock_data(symbol, period, kwargs.get('start_date'), kwargs.get('end_date'))
             if df_original is None:
                 return {'error': '데이터를 다운로드할 수 없습니다'}
 
