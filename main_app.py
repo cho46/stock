@@ -118,6 +118,16 @@ class ModelPerformance(db.Model):
     analysis_date = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+# 사용자 즐겨찾기 종목 모델
+class UserFavorites(db.Model):
+    __tablename__ = 'user_favorites'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), db.ForeignKey('users_info.user_id'), nullable=False)
+    ticker = db.Column(db.String(20), nullable=False)
+    __table_args__ = (db.UniqueConstraint('user_id', 'ticker', name='_user_ticker_uc'),)
+
+
+
 # 사용자 로더 함수
 @login_manager.user_loader
 def load_user(user_id):
@@ -373,8 +383,7 @@ def get_model_performance(model_name):
             model_name=model_name
         ).order_by(ModelPerformance.analysis_date.desc()).limit(10).all()
 
-        return jsonify([{
-            'symbol': p.symbol,
+        return jsonify([{'symbol': p.symbol,
             'total_return': p.total_return,
             'benchmark_return': p.benchmark_return,
             'win_rate': p.win_rate,
@@ -389,6 +398,207 @@ def get_model_performance(model_name):
         return jsonify([])
 
 
+@app.route('/api/market_overview')
+def market_overview():
+    """메인 페이지의 시장 현황 데이터 API (즐겨찾기 기반)"""
+    import yfinance as yf
+    import pandas as pd
+
+    if not current_user.is_authenticated:
+        return jsonify([])
+
+    user_id = current_user.get_id()
+    favorites = UserFavorites.query.filter_by(user_id=user_id).all()
+    
+    if not favorites:
+        return jsonify([])
+
+    tickers = [fav.ticker for fav in favorites]
+    market_data = []
+
+    if tickers:
+        try:
+            yf_data = yf.download(tickers, period='2d', progress=False)
+            if not yf_data.empty:
+                for ticker_symbol in tickers:
+                    try:
+                        # 단일 티커 조회 시에도 yf_data['Close']는 Series가 됨
+                        hist = yf_data['Close'] if len(tickers) == 1 else yf_data['Close'][ticker_symbol]
+                        
+                        if len(hist) >= 2 and not hist.isnull().all():
+                            last_price = hist.iloc[-1]
+                            prev_close = hist.iloc[-2]
+
+                            if pd.isna(last_price) or pd.isna(prev_close):
+                                raise ValueError("Price data contains NaN")
+
+                            change = last_price - prev_close
+                            percent_change = (change / prev_close) * 100 if prev_close != 0 else 0
+                            
+                            stock_info = UsStockInfo.query.get(ticker_symbol)
+                            name = stock_info.name if stock_info else ticker_symbol
+
+                            market_data.append({
+                                'ticker': ticker_symbol,
+                                'name': name,
+                                'price': last_price,
+                                'change': change,
+                                'percent_change': percent_change
+                            })
+                        else:
+                            raise ValueError("Not enough data")
+
+                    except Exception as e:
+                        logger.warning(f'Market overview: {ticker_symbol} 데이터 처리 실패: {e}')
+                        # 실패 시에도 프론트엔드 렌더링이 깨지지 않도록 None으로 채움
+                        stock_info = UsStockInfo.query.get(ticker_symbol)
+                        name = stock_info.name if stock_info else ticker_symbol
+                        market_data.append({
+                            'ticker': ticker_symbol,
+                            'name': name,
+                            'price': None,
+                            'change': None,
+                            'percent_change': None
+                        })
+
+        except Exception as e:
+            logger.error(f"시장 현황 데이터 조회 실패 (일괄): {e}")
+
+    return jsonify(market_data)
+
+
+@app.route('/api/stocks_list')
+@login_required
+def stocks_list():
+    """전체 종목 리스트 API (페이지네이션, 검색, 실시간 가격 포함)"""
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 30, type=int)
+        search_query = request.args.get('search', '', type=str).strip()
+
+        query = UsStockInfo.query
+        if search_query:
+            search_term = f"%{search_query}%"
+            query = query.filter(or_(
+                UsStockInfo.ticker.ilike(search_term),
+                UsStockInfo.name.ilike(search_term)
+            ))
+        
+        paginated_stocks = query.paginate(page=page, per_page=per_page, error_out=False)
+        db_stocks = paginated_stocks.items
+        tickers = [stock.ticker for stock in db_stocks]
+
+        user_favorites = UserFavorites.query.filter_by(user_id=current_user.get_id()).all()
+        favorite_tickers = {fav.ticker for fav in user_favorites}
+
+        price_data = {}
+        if tickers:
+            yf_data = yf.download(tickers, period='2d', progress=False)
+            if not yf_data.empty:
+                for ticker in tickers:
+                    try:
+                        hist = yf_data['Close'][ticker]
+                        if len(hist) >= 2 and not hist.isnull().all():
+                            last_price = hist.iloc[-1]
+                            prev_close = hist.iloc[-2]
+                            
+                            # NaN 값 체크 및 변환
+                            if pd.isna(last_price) or pd.isna(prev_close):
+                                price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
+                                continue
+
+                            change = last_price - prev_close
+                            percent_change = (change / prev_close) * 100 if prev_close != 0 else 0
+                            
+                            price_data[ticker] = {
+                                'price': last_price,
+                                'change': change,
+                                'percent_change': percent_change
+                            }
+                        else:
+                            price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
+                    except (KeyError, IndexError):
+                        price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
+                        logger.warning(f'yfinance에서 {ticker} 데이터를 처리할 수 없습니다.')
+
+        results = []
+        for stock in db_stocks:
+            data = price_data.get(stock.ticker, {'price': None, 'change': None, 'percent_change': None})
+            results.append({
+                'ticker': stock.ticker,
+                'name': stock.name,
+                'price': data['price'],
+                'change': data['change'],
+                'percent_change': data['percent_change'],
+                'is_favorite': stock.ticker in favorite_tickers
+            })
+
+        return jsonify({
+            'stocks': results,
+            'pagination': {
+                'page': paginated_stocks.page,
+                'per_page': paginated_stocks.per_page,
+                'total_pages': paginated_stocks.pages,
+                'total_items': paginated_stocks.total,
+                'has_next': paginated_stocks.has_next,
+                'has_prev': paginated_stocks.has_prev
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"종목 리스트 API 오류: {e}")
+        return jsonify({"error": "데이터를 불러오는 중 오류가 발생했습니다."}), 500
+
+
+@app.route('/api/favorites/add', methods=['POST'])
+@login_required
+def add_favorite():
+    """즐겨찾기 추가 API"""
+    data = request.get_json()
+    ticker = data.get('ticker')
+    if not ticker:
+        return jsonify({'status': 'error', 'message': 'Ticker is required'}), 400
+
+    try:
+        user_id = current_user.get_id()
+        existing = UserFavorites.query.filter_by(user_id=user_id, ticker=ticker).first()
+        if not existing:
+            new_fav = UserFavorites(user_id=user_id, ticker=ticker)
+            db.session.add(new_fav)
+            db.session.commit()
+        return jsonify({'status': 'success', 'message': 'Favorite added'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"즐겨찾기 추가 오류: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to add favorite'}), 500
+
+
+@app.route('/api/favorites/remove', methods=['POST'])
+@login_required
+def remove_favorite():
+    """즐겨찾기 제거 API"""
+    data = request.get_json()
+    ticker = data.get('ticker')
+    if not ticker:
+        return jsonify({'status': 'error', 'message': 'Ticker is required'}), 400
+
+    try:
+        user_id = current_user.get_id()
+        fav = UserFavorites.query.filter_by(user_id=user_id, ticker=ticker).first()
+        if fav:
+            db.session.delete(fav)
+            db.session.commit()
+        return jsonify({'status': 'success', 'message': 'Favorite removed'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"즐겨찾기 제거 오류: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to remove favorite'}), 500
+
+
 # --- 웹 페이지 라우트들 ---
 
 @app.route('/')
@@ -401,6 +611,19 @@ def index():
 def chart_page():
     """차트 페이지"""
     return render_template('chart.html')
+
+
+@app.route('/analysis')
+def analysis_page():
+    """분석 페이지"""
+    return render_template('analysis.html')
+
+
+@app.route('/stocks')
+@login_required
+def stocks_page():
+    """종목보기 페이지"""
+    return render_template('stocks.html')
 
 
 @app.route('/dashboard')
