@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI TradingView - 모델 관리</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: #000000; line-height: 1.6; }
+        .header { background: #000000; color: #ffffff; padding: 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 1000; }
+        .navbar { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; height: 70px; }
+        .logo { display: flex; align-items: center; font-size: 1.5rem; font-weight: 700; gap: 10px; }
+        .nav-menu { display: flex; gap: 30px; align-items: center; }
+        .nav-item { color: #ffffff; text-decoration: none; font-weight: 500; padding: 8px 16px; border-radius: 6px; transition: all 0.3s ease; }
+        .nav-item:hover { background: rgba(255,255,255,0.1); }
+        .user-menu { display: flex; align-items: center; gap: 15px; }
+        .login-btn, .signup-btn { padding: 8px 20px; border: 2px solid #ffffff; background: transparent; color: #ffffff; border-radius: 6px; text-decoration: none; font-weight: 500; transition: all 0.3s ease; cursor: pointer; }
+        .login-btn:hover { background: #ffffff; color: #000000; }
+        .signup-btn { background: #ffffff; color: #000000; }
+        .signup-btn:hover { background: transparent; color: #ffffff; }
+        .user-profile { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .avatar { width: 32px; height: 32px; border-radius: 50%; background: #ffffff; color: #000000; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+        .status-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+        .status-indicator.online { background: #16a085; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 30px 20px; }
+        .models-container { background: #ffffff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .models-header { margin-bottom: 25px; }
+        .models-header h2 { font-size: 1.8rem; }
+        .models-table { width: 100%; border-collapse: collapse; }
+        .models-table th, .models-table td { padding: 15px; text-align: left; border-bottom: 1px solid #e5e5e5; }
+        .models-table th { background-color: #f8f9fa; font-weight: 600; }
+        .models-table tr:hover { background-color: #f8f9fa; }
+        .delete-btn { background: none; border: 1px solid #e74c3c; color: #e74c3c; padding: 5px 10px; border-radius: 5px; cursor: pointer; transition: all 0.2s; }
+        .delete-btn:hover { background: #e74c3c; color: #ffffff; }
+        .loading-placeholder { text-align: center; padding: 50px; color: #666; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <nav class="navbar">
+            <div class="logo"><i class="fas fa-chart-line"></i> AI TradingView</div>
+            <div class="nav-menu">
+                <a href="{{ url_for('index') }}" class="nav-item">메인</a>
+                <a href="{{ url_for('models_page') }}" class="nav-item">모델관리</a>
+                <a href="{{ url_for('portfolio_page') }}" class="nav-item">포트폴리오</a>
+                <a href="{{ url_for('analysis_page') }}" class="nav-item">분석</a>
+                <a href="{{ url_for('stocks_page') }}" class="nav-item">종목보기</a>
+            </div>
+            <div class="user-menu">
+                {% if current_user.is_authenticated %}
+                <div class="user-profile" id="userProfile">
+                    <a href="{{ url_for('profile') }}" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px;">
+                        <div class="status-indicator online"></div>
+                        <div class="avatar">{{ current_user.name[0] }}</div>
+                        <span>안녕하세요, {{ current_user.name }}님</span>
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="login-btn">로그아웃</a>
+                </div>
+                {% else %}
+                <div id="authButtons">
+                    <a href="{{ url_for('login') }}" class="login-btn">로그인</a>
+                    <a href="{{ url_for('register') }}" class="signup-btn">회원가입</a>
+                </div>
+                {% endif %}
+            </div>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="models-container">
+            <div class="models-header">
+                <h2>내 모델 관리</h2>
+            </div>
+            <table class="models-table">
+                <thead>
+                    <tr>
+                        <th>모델 파일명</th>
+                        <th>대상 종목</th>
+                        <th>AI 전략</th>
+                        <th>생성일</th>
+                        <th>관리</th>
+                    </tr>
+                </thead>
+                <tbody id="modelsTableBody">
+                    <!-- Data will be loaded by JavaScript -->
+                     <tr><td colspan="5" class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i> 모델 목록을 불러오는 중입니다...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tableBody = document.getElementById('modelsTableBody');
+
+            const loadModels = () => {
+                tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i> 모델 목록을 불러오는 중입니다...</td></tr>`;
+
+                fetch('/model')
+                    .then(response => {
+                        if (!response.ok) throw new Error('Network response was not ok.');
+                        return response.json();
+                    })
+                    .then(data => {
+                        tableBody.innerHTML = ''; // Clear loading/old data
+                        if (data.error) throw new Error(data.error);
+
+                        if (data && data.length > 0) {
+                            data.forEach(model => {
+                                const tr = document.createElement('tr');
+                                tr.dataset.filename = model.filename;
+                                const createdDate = model.created_date ? new Date(model.created_date).toLocaleString('ko-KR') : '알 수 없음';
+
+                                tr.innerHTML = `
+                                    <td>${model.filename}</td>
+                                    <td>${model.symbol}</td>
+                                    <td>${model.strategy}</td>
+                                    <td>${createdDate}</td>
+                                    <td>
+                                        <button class="delete-btn" data-filename="${model.filename}">
+                                            <i class="fas fa-trash-alt"></i> 삭제
+                                        </button>
+                                    </td>
+                                `;
+                                tableBody.appendChild(tr);
+                            });
+                        } else {
+                            tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder">훈련된 모델이 없습니다. '분석' 페이지에서 모델을 훈련시켜 주세요.</td></tr>`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching models:', error);
+                        tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder">모델 목록을 불러오는 중 오류가 발생했습니다.</td></tr>`;
+                    });
+            };
+
+            tableBody.addEventListener('click', function(e) {
+                const deleteButton = e.target.closest('.delete-btn');
+                if (deleteButton) {
+                    const filename = deleteButton.dataset.filename;
+                    
+                    if (confirm(`정말로 '${filename}' 모델을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) {
+                        deleteButton.disabled = true;
+                        deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+                        fetch('/api/models/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ filename: filename })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                // UI에서 해당 행 제거
+                                document.querySelector(`tr[data-filename="${filename}"]`).remove();
+                                alert('모델이 성공적으로 삭제되었습니다.');
+                            } else {
+                                throw new Error(data.message || '삭제 실패');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Delete model error:', error);
+                            alert(`모델 삭제 중 오류가 발생했습니다: ${error.message}`);
+                            deleteButton.disabled = false;
+                            deleteButton.innerHTML = '<i class="fas fa-trash-alt"></i> 삭제';
+                        });
+                    }
+                }
+            });
+
+            // Initial load
+            loadModels();
+        });
+    </script>
+</body>
+</html>

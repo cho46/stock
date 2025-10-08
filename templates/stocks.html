@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI TradingView - 종목 보기</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: #000000; line-height: 1.6; }
+        .header { background: #000000; color: #ffffff; padding: 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 1000; }
+        .navbar { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; height: 70px; }
+        .logo { display: flex; align-items: center; font-size: 1.5rem; font-weight: 700; gap: 10px; }
+        .nav-menu { display: flex; gap: 30px; align-items: center; }
+        .nav-item { color: #ffffff; text-decoration: none; font-weight: 500; padding: 8px 16px; border-radius: 6px; transition: all 0.3s ease; }
+        .nav-item:hover { background: rgba(255,255,255,0.1); }
+        .user-menu { display: flex; align-items: center; gap: 15px; }
+        .login-btn, .signup-btn { padding: 8px 20px; border: 2px solid #ffffff; background: transparent; color: #ffffff; border-radius: 6px; text-decoration: none; font-weight: 500; transition: all 0.3s ease; cursor: pointer; }
+        .login-btn:hover { background: #ffffff; color: #000000; }
+        .signup-btn { background: #ffffff; color: #000000; }
+        .signup-btn:hover { background: transparent; color: #ffffff; }
+        .user-profile { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .avatar { width: 32px; height: 32px; border-radius: 50%; background: #ffffff; color: #000000; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+        .status-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+        .status-indicator.online { background: #16a085; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 30px 20px; }
+        .stocks-container { background: #ffffff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .stocks-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 20px; }
+        .stocks-header h2 { font-size: 1.8rem; }
+        .search-box { width: 300px; position: relative; }
+        .search-box input { width: 100%; padding: 10px 15px; border-radius: 8px; border: 1px solid #e5e5e5; font-size: 1rem; }
+        .stocks-table { width: 100%; border-collapse: collapse; }
+        .stocks-table th, .stocks-table td { padding: 15px; text-align: left; border-bottom: 1px solid #e5e5e5; }
+        .stocks-table th { background-color: #f8f9fa; font-weight: 600; }
+        .stocks-table tr:hover { background-color: #f8f9fa; }
+        .fav-btn { background: none; border: none; cursor: pointer; font-size: 1.5rem; color: #cccccc; transition: color 0.2s; }
+        .fav-btn.favorited { color: #f1c40f; }
+        .change.positive { color: #16a085; }
+        .change.negative { color: #e74c3c; }
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 25px; }
+        .pagination button, .pagination span { padding: 8px 15px; border-radius: 6px; border: 1px solid #e5e5e5; background: #fff; cursor: pointer; }
+        .pagination button:disabled { cursor: not-allowed; background: #f8f9fa; }
+        .pagination span { border: none; }
+        .loading-placeholder { text-align: center; padding: 50px; color: #666; }
+
+        /* Notification Styles */
+        .notification { position: fixed; top: 80px; right: 20px; padding: 15px 25px; border-radius: 8px; color: #fff; font-size: 1rem; font-weight: 500; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 2000; opacity: 0; transform: translateX(100%); transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55); }
+        .notification.show { opacity: 1; transform: translateX(0); }
+        .notification.success { background-color: #16a085; }
+        .notification.error { background-color: #e74c3c; }
+
+        /* Currency Toggle Switch */
+        .currency-toggle { display: flex; align-items: center; gap: 10px; }
+        .currency-toggle span { font-size: 1rem; font-weight: 500; }
+        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; }
+        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; }
+        input:checked + .slider { background-color: #16a085; }
+        input:focus + .slider { box-shadow: 0 0 1px #16a085; }
+        input:checked + .slider:before { transform: translateX(26px); }
+        .slider.round { border-radius: 34px; }
+        .slider.round:before { border-radius: 50%; }
+
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <nav class="navbar">
+            <div class="logo"><i class="fas fa-chart-line"></i> AI TradingView</div>
+            <div class="nav-menu">
+                <a href="{{ url_for('index') }}" class="nav-item">메인</a>
+                <a href="{{ url_for('models_page') }}" class="nav-item">모델관리</a>
+                <a href="{{ url_for('portfolio_page') }}" class="nav-item">포트폴리오</a>
+                <a href="{{ url_for('analysis_page') }}" class="nav-item">분석</a>
+                <a href="{{ url_for('stocks_page') }}" class="nav-item">종목보기</a>
+            </div>
+            <div class="user-menu">
+                {% if current_user.is_authenticated %}
+                <div class="user-profile" id="userProfile">
+                    <a href="{{ url_for('profile') }}" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px;">
+                        <div class="status-indicator online"></div>
+                        <div class="avatar">{{ current_user.name[0] }}</div>
+                        <span>안녕하세요, {{ current_user.name }}님</span>
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="login-btn">로그아웃</a>
+                </div>
+                {% else %}
+                <div id="authButtons">
+                    <a href="{{ url_for('login') }}" class="login-btn">로그인</a>
+                    <a href="{{ url_for('register') }}" class="signup-btn">회원가입</a>
+                </div>
+                {% endif %}
+            </div>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="stocks-container">
+            <div class="stocks-header">
+                <h2>전체 종목 보기</h2>
+                <div class="currency-toggle">
+                    <span>USD</span>
+                    <label class="switch">
+                        <input type="checkbox" id="currencyToggle">
+                        <span class="slider round"></span>
+                    </label>
+                    <span>KRW</span>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="종목명 또는 티커 검색...">
+                </div>
+            </div>
+            <table class="stocks-table">
+                <thead>
+                    <tr>
+                        <th>티커</th>
+                        <th>회사명</th>
+                        <th id="priceHeader">현재가 (USD)</th>
+                        <th id="changeHeader">등락 (USD)</th>
+                        <th style="width: 250px;">관리</th>
+                    </tr>
+                </thead>
+                <tbody id="stocksTableBody">
+                    <!-- Data will be loaded by JavaScript -->
+                     <tr><td colspan="5" class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i> 종목 정보를 불러오는 중입니다...</td></tr>
+                </tbody>
+            </table>
+            <div class="pagination" id="paginationControls">
+                <!-- Pagination will be loaded by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tableBody = document.getElementById('stocksTableBody');
+            const paginationControls = document.getElementById('paginationControls');
+            const searchInput = document.getElementById('searchInput');
+            const currencyToggle = document.getElementById('currencyToggle');
+            const priceHeader = document.getElementById('priceHeader');
+            const changeHeader = document.getElementById('changeHeader');
+
+            let currentPage = 1;
+            let currentSearch = '';
+            let searchTimeout;
+            let exchangeRate = null;
+
+            // --- Currency Conversion Logic ---
+            const loadExchangeRate = () => {
+                const savedRateData = localStorage.getItem('usdToKrwRateData');
+                if (savedRateData) {
+                    exchangeRate = JSON.parse(savedRateData).rate;
+                } else {
+                    currencyToggle.disabled = true;
+                    const toggleContainer = document.querySelector('.currency-toggle');
+                    const notice = document.createElement('span');
+                    notice.textContent = '환율 정보 없음';
+                    notice.style.color = '#e74c3c';
+                    notice.style.fontSize = '0.8rem';
+                    toggleContainer.appendChild(notice);
+                }
+            };
+
+            const updateCurrencyDisplay = () => {
+                const isKrw = currencyToggle.checked;
+                priceHeader.textContent = `현재가 (${isKrw ? 'KRW' : 'USD'})`;
+                changeHeader.textContent = `등락 (${isKrw ? 'KRW' : 'USD'})`;
+
+                document.querySelectorAll('#stocksTableBody tr').forEach(tr => {
+                    const priceCell = tr.querySelector('.stock-price');
+                    const changeCell = tr.querySelector('.stock-change');
+                    if (!priceCell || !changeCell || !tr.dataset.priceUsd) return;
+
+                    const priceUsd = parseFloat(tr.dataset.priceUsd);
+                    const changeUsd = parseFloat(tr.dataset.changeUsd);
+
+                    if (isKrw && exchangeRate) {
+                        const priceKrw = priceUsd * exchangeRate;
+                        const changeKrw = changeUsd * exchangeRate;
+                        priceCell.textContent = `₩${priceKrw.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}`;
+                        changeCell.innerHTML = `<span class="change ${changeUsd >= 0 ? 'positive' : 'negative'}">₩${changeKrw.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}</span>`;
+                    } else {
+                        priceCell.textContent = `$${priceUsd.toFixed(2)}`;
+                        const sign = changeUsd >= 0 ? '+' : '';
+                        changeCell.innerHTML = `<span class="change ${changeUsd >= 0 ? 'positive' : 'negative'}">${sign}${changeUsd.toFixed(2)}</span>`;
+                    }
+                });
+            };
+
+            // --- Data Fetching and Rendering ---
+            const showNotification = (message, type = 'success') => {
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                setTimeout(() => notification.classList.add('show'), 10);
+                setTimeout(() => { notification.classList.remove('show'); setTimeout(() => document.body.removeChild(notification), 500); }, 3000);
+            };
+
+            const fetchStocks = (page = 1, search = '') => {
+                tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder"><i class="fas fa-spinner fa-spin"></i> 종목 정보를 불러오는 중입니다...</td></tr>`;
+                const url = `/api/stocks_list?page=${page}&search=${encodeURIComponent(search)}`;
+
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        tableBody.innerHTML = '';
+                        if (data.error) throw new Error(data.error);
+
+                        if (data.stocks && data.stocks.length > 0) {
+                            data.stocks.forEach(stock => {
+                                const tr = document.createElement('tr');
+                                // Store original USD values in data attributes
+                                tr.dataset.priceUsd = stock.price || '0';
+                                tr.dataset.changeUsd = stock.change || '0';
+
+                                const favClass = stock.is_favorite ? 'favorited' : '';
+
+                                tr.innerHTML = `
+                                    <td><strong>${stock.ticker}</strong></td>
+                                    <td>${stock.name}</td>
+                                    <td class="stock-price"></td>
+                                    <td class="stock-change"></td>
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 10px;">
+                                            <input type="number" class="quantity-input" style="width: 60px; padding: 5px;" min="0.01" step="0.01" placeholder="수량">
+                                            <button class="btn-buy" style="padding: 5px 8px; background: #16a085; color: white; border: none; border-radius: 4px; cursor: pointer;">매수</button>
+                                            <button class="btn-sell" style="padding: 5px 8px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">매도</button>
+                                            <button class="fav-btn ${favClass}" data-ticker="${stock.ticker}">
+                                                <i class="fas fa-star"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                `;
+                                tableBody.appendChild(tr);
+                            });
+                        } else {
+                            tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder">해당하는 종목이 없습니다.</td></tr>`;
+                        }
+                        renderPagination(data.pagination);
+                        updateCurrencyDisplay(); // Apply currency format after rendering
+                    })
+                    .catch(error => {
+                        console.error('Error fetching stocks:', error);
+                        tableBody.innerHTML = `<tr><td colspan="5" class="loading-placeholder">오류가 발생했습니다. 잠시 후 다시 시도해주세요.</td></tr>`;
+                    });
+            };
+
+            const renderPagination = (pagination) => {
+                paginationControls.innerHTML = '';
+                if (!pagination || pagination.total_pages <= 1) return;
+                const prevBtn = document.createElement('button');
+                prevBtn.innerHTML = '&laquo; 이전';
+                prevBtn.disabled = !pagination.has_prev;
+                prevBtn.addEventListener('click', () => fetchStocks(pagination.page - 1, currentSearch));
+                paginationControls.appendChild(prevBtn);
+                const pageSpan = document.createElement('span');
+                pageSpan.textContent = `페이지 ${pagination.page} / ${pagination.total_pages}`;
+                paginationControls.appendChild(pageSpan);
+                const nextBtn = document.createElement('button');
+                nextBtn.innerHTML = '다음 &raquo;';
+                nextBtn.disabled = !pagination.has_next;
+                nextBtn.addEventListener('click', () => fetchStocks(pagination.page + 1, currentSearch));
+                paginationControls.appendChild(nextBtn);
+            };
+
+            // --- Event Listeners ---
+            searchInput.addEventListener('keyup', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => { currentSearch = e.target.value; currentPage = 1; fetchStocks(currentPage, currentSearch); }, 300);
+            });
+
+            currencyToggle.addEventListener('change', updateCurrencyDisplay);
+
+            tableBody.addEventListener('click', function(e) {
+                const target = e.target;
+                const row = target.closest('tr');
+                if (!row) return;
+                const ticker = row.querySelector('.fav-btn')?.dataset.ticker;
+                if (target.closest('.fav-btn')) {
+                    handleFavoriteClick(target.closest('.fav-btn'), ticker);
+                } else if (target.matches('.btn-buy') || target.matches('.btn-sell')) {
+                    handleTransactionClick(row, ticker, target.matches('.btn-buy') ? 'BUY' : 'SELL');
+                }
+            });
+
+            // --- Action Handlers ---
+            const handleFavoriteClick = (favButton, ticker) => {
+                const isFavorited = favButton.classList.contains('favorited');
+                const url = isFavorited ? '/api/favorites/remove' : '/api/favorites/add';
+                favButton.disabled = true;
+                fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: ticker }) })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            favButton.classList.toggle('favorited');
+                            showNotification(isFavorited ? '즐겨찾기에서 제거했습니다.' : '즐겨찾기에 추가했습니다.', 'success');
+                        } else { showNotification(data.message || '오류가 발생했습니다.', 'error'); }
+                    })
+                    .catch(err => showNotification('즐겨찾기 변경 중 오류가 발생했습니다.', 'error'))
+                    .finally(() => favButton.disabled = false);
+            };
+
+            const handleTransactionClick = (row, ticker, transactionType) => {
+                const quantityInput = row.querySelector('.quantity-input');
+                const priceUsd = parseFloat(row.dataset.priceUsd);
+
+                if (isNaN(priceUsd)) {
+                    showNotification('현재가를 확인할 수 없어 거래할 수 없습니다.', 'error');
+                    return;
+                }
+
+                const quantity = parseFloat(quantityInput.value);
+                if (isNaN(quantity) || quantity <= 0) {
+                    showNotification('유효한 수량을 입력해주세요.', 'error');
+                    quantityInput.focus();
+                    return;
+                }
+
+                const transactionPrice = priceUsd; // Transact in USD
+                const confirmMsg = `'${ticker}' ${quantity}주를 $${transactionPrice.toFixed(2)}에 ${transactionType === 'BUY' ? '매수' : '매도'}하시겠습니까?`;
+
+                if (!confirm(confirmMsg)) return;
+
+                const payload = { ticker, quantity, price: transactionPrice, transaction_type: transactionType };
+
+                fetch('/api/portfolio/transact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            showNotification('거래가 성공적으로 체결되었습니다.', 'success');
+                            quantityInput.value = '';
+                        } else { showNotification(`거래 실패: ${data.message}`, 'error'); }
+                    })
+                    .catch(err => showNotification('거래 처리 중 오류가 발생했습니다.', 'error'));
+            };
+
+            // --- Initial Load ---
+            loadExchangeRate();
+            fetchStocks(currentPage, currentSearch);
+        });
+    </script>
+</body>
+</html>
