@@ -49,13 +49,13 @@ def run_training_process(symbol, period, user_id, model_name, strategy: str = 'b
         }
         params = HYPERPARAMS.get(strategy, HYPERPARAMS['balanced'])
 
-        yield json.dumps({"status": "progress", "message": f"{symbol} 데이터 다운로드 중..."}) + '\n'
+        yield json.dumps({"status": "progress_update", "percentage": 5, "message": f"{symbol} 데이터 다운로드 중..."}) + '\n'
         df, requested_start_date = download_stock_data(symbol, period)
         if df is None:
             yield json.dumps({"status": "error", "message": "데이터를 다운로드할 수 없습니다."}) + '\n'
             return
 
-        yield json.dumps({"status": "progress", "message": "고급 기술적 지표 추가 중..."}) + '\n'
+        yield json.dumps({"status": "progress_update", "percentage": 15, "message": "고급 기술적 지표 추가 중..."}) + '\n'
         df.columns = df.columns.str.strip()
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
@@ -66,14 +66,13 @@ def run_training_process(symbol, period, user_id, model_name, strategy: str = 'b
         df = add_advanced_technical_indicators(df)
         df.dropna(inplace=True)
 
-        # 지표 계산 후, 요청된 시작일로 데이터 필터링
         df = df[df.index >= requested_start_date]
 
         if len(df) < 200:
             yield json.dumps({"status": "error", "message": f"데이터가 너무 적어 훈련할 수 없습니다. 요청 기간: {period}, 최종 데이터: {len(df)}일"}) + '\n'
             return
 
-        yield json.dumps({"status": "progress", "message": "데이터 정규화 및 분할 중..."}) + '\n'
+        yield json.dumps({"status": "progress_update", "percentage": 30, "message": "데이터 정규화 및 분할 중..."}) + '\n'
         train_size = int(len(df) * 0.8)
         train_df = df[:train_size].copy()
         val_df = df[train_size:].copy()
@@ -84,37 +83,49 @@ def run_training_process(symbol, period, user_id, model_name, strategy: str = 'b
         train_df[feature_cols] = scaler.fit_transform(train_df[feature_cols])
         val_df[feature_cols] = scaler.transform(val_df[feature_cols])
 
-        # 스케일링 후 발생할 수 있는 NaN/inf 값 처리
         train_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         train_df.fillna(0, inplace=True)
         val_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         val_df.fillna(0, inplace=True)
 
-        yield json.dumps({"status": "progress", "message": f"{strategy.capitalize()} 전략으로 환경 설정 및 모델 초기화 중..."}) + '\n'
+        yield json.dumps({"status": "progress_update", "percentage": 45, "message": f"{strategy.capitalize()} 전략으로 환경 설정 및 모델 초기화 중..."}) + '\n'
         train_env = DummyVecEnv([lambda: ResetFixWrapper(Monitor(ImprovedStockTradingEnv(train_df)))])
         eval_env = DummyVecEnv([lambda: ResetFixWrapper(Monitor(ImprovedStockTradingEnv(val_df)))])
         model = PPO('MlpPolicy', train_env, verbose=0, **params)
 
-        # 콜백 설정 및 오류 수정
-        reward_threshold = 1.5 # 목표 수익률 50%
+        reward_threshold = 1.5
         callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=reward_threshold, verbose=1)
-        callback_on_best.training_stopped = False # 오류 해결
+        callback_on_best.training_stopped = False
         eval_callback = EvalCallback(eval_env, best_model_save_path=None, log_path=None, eval_freq=2000, deterministic=True, render=False, callback_on_new_best=callback_on_best)
 
-        total_timesteps = 50000 # 훈련량 재조정
-        yield json.dumps({"status": "progress", "message": f"총 {total_timesteps} 스텝의 모델 훈련을 시작합니다..."}) + '\n'
-        model.learn(total_timesteps=total_timesteps, callback=eval_callback, progress_bar=False) # 진행률 표시는 프론트엔드에서 담당
+        total_timesteps = 50000
+        yield json.dumps({"status": "progress_update", "percentage": 50, "message": f"총 {total_timesteps} 스텝의 모델 훈련을 시작합니다..."}) + '\n'
+        model.learn(total_timesteps=total_timesteps, callback=eval_callback, progress_bar=False)
 
-        yield json.dumps({"status": "progress", "message": "모델 및 관련 파일 저장 중..."}) + '\n'
+        yield json.dumps({"status": "progress_update", "percentage": 90, "message": "모델 및 관련 파일 저장 중..."}) + '\n'
         user_models_dir = os.path.join("D:\\", "StockModelFolder", user_id)
         os.makedirs(user_models_dir, exist_ok=True)
         sanitized_model_name = "".join(c for c in model_name if c.isalnum() or c in ('_', '-')).rstrip() or f"{symbol}_{strategy}_model"
+        
         model_path = os.path.join(user_models_dir, f"{sanitized_model_name}.zip")
         scaler_path = os.path.join(user_models_dir, f"{sanitized_model_name}_scaler.pkl")
+        metadata_path = os.path.join(user_models_dir, f"{sanitized_model_name}_metadata.json")
+
         model.save(model_path)
         joblib.dump(scaler, scaler_path)
 
-        yield json.dumps({"status": "success", "message": f"모델 훈련 완료: {sanitized_model_name}"}) + '\n'
+        # 메타데이터 저장
+        metadata = {
+            'symbol': symbol,
+            'strategy': strategy,
+            'training_date': datetime.now().isoformat(),
+            'total_timesteps': total_timesteps,
+            'final_return': 0 # 이 값은 백테스팅 후 업데이트 될 수 있습니다.
+        }
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=4)
+
+        yield json.dumps({"status": "success", "percentage": 100, "message": f"모델 훈련 완료: {sanitized_model_name}"}) + '\n'
 
     except Exception as e:
         logger.error(f"훈련 중 치명적 오류 발생: {e}")

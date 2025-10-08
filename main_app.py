@@ -19,6 +19,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import or_
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
 
 # 로깅 설정
 logging.basicConfig(
@@ -127,6 +129,122 @@ class UserFavorites(db.Model):
     __table_args__ = (db.UniqueConstraint('user_id', 'ticker', name='_user_ticker_uc'),)
 
 
+# 실시간 가격 캐시 모델
+class RealtimeStockPrice(db.Model):
+    __tablename__ = 'realtime_stock_prices'
+    ticker = db.Column(db.String(20), primary_key=True)
+    price = db.Column(db.Float)
+    change = db.Column(db.Float)
+    percent_change = db.Column(db.Float)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 포트폴리오 보유 종목 모델
+class PortfolioHolding(db.Model):
+    __tablename__ = 'portfolio_holdings'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), db.ForeignKey('users_info.user_id'), nullable=False)
+    ticker = db.Column(db.String(20), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    average_cost = db.Column(db.Float, nullable=False)
+    __table_args__ = (db.UniqueConstraint('user_id', 'ticker', name='_user_holding_uc'),)
+
+
+# 포트폴리오 거래 내역 모델
+class PortfolioTransaction(db.Model):
+    __tablename__ = 'portfolio_transactions'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), db.ForeignKey('users_info.user_id'), nullable=False)
+    ticker = db.Column(db.String(20), nullable=False)
+    transaction_type = db.Column(db.String(4), nullable=False)  # 'BUY' or 'SELL'
+    quantity = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    transaction_date = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+
+# --- 헬퍼 함수들 ---
+
+def get_prices_from_cache_or_fetch(tickers: list):
+    """DB 캐시에서 가격을 조회하고, 오래된 데이터는 API로 새로 가져오되, 실패 시 캐시된 데이터를 우선 사용합니다."""
+    import yfinance as yf
+    import pandas as pd
+    from datetime import datetime, timedelta
+
+    if not tickers:
+        return {}
+
+    final_prices = {}
+    stale_tickers = []
+
+    # 1. 요청된 모든 종목에 대해 캐시된 데이터를 먼저 모두 불러와 결과에 저장
+    cached_prices = RealtimeStockPrice.query.filter(RealtimeStockPrice.ticker.in_(tickers)).all()
+    cache_fresh_time = datetime.utcnow() - timedelta(seconds=60)
+
+    for price_obj in cached_prices:
+        final_prices[price_obj.ticker] = {
+            'price': price_obj.price,
+            'change': price_obj.change,
+            'percent_change': price_obj.percent_change
+        }
+        # 데이터가 오래되었는지 확인
+        if price_obj.last_updated < cache_fresh_time:
+            stale_tickers.append(price_obj.ticker)
+
+    # 2. 캐시에 아예 존재하지 않는 종목 식별
+    cached_tickers_set = {p.ticker for p in cached_prices}
+    missing_tickers = [t for t in tickers if t not in cached_tickers_set]
+
+    # 3. 오래된 종목과 없는 종목을 합쳐 새로 조회할 목록 생성
+    to_fetch = stale_tickers + missing_tickers
+
+    if to_fetch:
+        try:
+            yf_data = yf.download(to_fetch, period='2d', progress=False, timeout=10)
+            if not yf_data.empty:
+                for ticker_symbol in to_fetch:
+                    try:
+                        hist = yf_data['Close'] if len(to_fetch) == 1 else yf_data['Close'][ticker_symbol]
+                        if len(hist) >= 2 and not hist.isnull().all():
+                            last_price = hist.iloc[-1]
+                            prev_close = hist.iloc[-2]
+
+                            if pd.isna(last_price) or pd.isna(prev_close):
+                                continue
+
+                            change = last_price - prev_close
+                            percent_change = (change / prev_close) * 100 if prev_close != 0 else 0
+
+                            # 성공 시, 결과와 DB 모두 업데이트
+                            final_prices[ticker_symbol] = {
+                                'price': last_price,
+                                'change': change,
+                                'percent_change': percent_change
+                            }
+                            
+                            price_entry = RealtimeStockPrice.query.get(ticker_symbol)
+                            if price_entry:
+                                price_entry.price = last_price
+                                price_entry.change = change
+                                price_entry.percent_change = percent_change
+                                price_entry.last_updated = datetime.utcnow()
+                            else:
+                                price_entry = RealtimeStockPrice(
+                                    ticker=ticker_symbol, price=last_price, 
+                                    change=change, percent_change=percent_change
+                                )
+                                db.session.add(price_entry)
+                    except Exception as e:
+                        logger.warning(f'Helper: {ticker_symbol} 데이터 처리 실패: {e}')
+                        # 실패 시, 기존의 stale 데이터가 final_prices에 남아있게 됨
+
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Helper: yfinance 데이터 조회 실패: {e}")
+
+    return final_prices
+
 
 # 사용자 로더 함수
 @login_manager.user_loader
@@ -231,6 +349,7 @@ def analyze_stock_route():
         period = data['period']
         initial_balance = float(data.get('initial_balance', 10000))
         user_id = current_user.get_id()
+        strategy = data.get('strategy', 'balanced') # 누락된 strategy 변수 추가
 
         logger.info(f"분석 요청 - 사용자: {user_id}, 종목: {symbol}, 모델: {model_name}")
 
@@ -256,6 +375,7 @@ def analyze_stock_route():
                 user_id=user_id,
                 model_name=model_name,
                 symbol=symbol,
+                strategy=strategy, # 전략 저장 추가
                 total_return=result.get('total_return'),
                 benchmark_return=result.get('benchmark_return'),
                 win_rate=result.get('win_rate'),
@@ -400,81 +520,39 @@ def get_model_performance(model_name):
 
 @app.route('/api/market_overview')
 def market_overview():
-    """메인 페이지의 시장 현황 데이터 API (즐겨찾기 기반)"""
-    import yfinance as yf
-    import pandas as pd
-
+    """메인 페이지의 시장 현황 데이터 API (캐시 기반)"""
     if not current_user.is_authenticated:
         return jsonify([])
 
     user_id = current_user.get_id()
     favorites = UserFavorites.query.filter_by(user_id=user_id).all()
-    
     if not favorites:
         return jsonify([])
 
     tickers = [fav.ticker for fav in favorites]
+    price_data = get_prices_from_cache_or_fetch(tickers)
+
     market_data = []
+    for ticker_symbol in tickers:
+        stock_info = UsStockInfo.query.get(ticker_symbol)
+        name = stock_info.name if stock_info else ticker_symbol
+        data = price_data.get(ticker_symbol)
 
-    if tickers:
-        try:
-            yf_data = yf.download(tickers, period='2d', progress=False)
-            if not yf_data.empty:
-                for ticker_symbol in tickers:
-                    try:
-                        # 단일 티커 조회 시에도 yf_data['Close']는 Series가 됨
-                        hist = yf_data['Close'] if len(tickers) == 1 else yf_data['Close'][ticker_symbol]
-                        
-                        if len(hist) >= 2 and not hist.isnull().all():
-                            last_price = hist.iloc[-1]
-                            prev_close = hist.iloc[-2]
-
-                            if pd.isna(last_price) or pd.isna(prev_close):
-                                raise ValueError("Price data contains NaN")
-
-                            change = last_price - prev_close
-                            percent_change = (change / prev_close) * 100 if prev_close != 0 else 0
-                            
-                            stock_info = UsStockInfo.query.get(ticker_symbol)
-                            name = stock_info.name if stock_info else ticker_symbol
-
-                            market_data.append({
-                                'ticker': ticker_symbol,
-                                'name': name,
-                                'price': last_price,
-                                'change': change,
-                                'percent_change': percent_change
-                            })
-                        else:
-                            raise ValueError("Not enough data")
-
-                    except Exception as e:
-                        logger.warning(f'Market overview: {ticker_symbol} 데이터 처리 실패: {e}')
-                        # 실패 시에도 프론트엔드 렌더링이 깨지지 않도록 None으로 채움
-                        stock_info = UsStockInfo.query.get(ticker_symbol)
-                        name = stock_info.name if stock_info else ticker_symbol
-                        market_data.append({
-                            'ticker': ticker_symbol,
-                            'name': name,
-                            'price': None,
-                            'change': None,
-                            'percent_change': None
-                        })
-
-        except Exception as e:
-            logger.error(f"시장 현황 데이터 조회 실패 (일괄): {e}")
-
+        market_data.append({
+            'ticker': ticker_symbol,
+            'name': name,
+            'price': data.get('price') if data else None,
+            'change': data.get('change') if data else None,
+            'percent_change': data.get('percent_change') if data else None
+        })
+    
     return jsonify(market_data)
 
 
 @app.route('/api/stocks_list')
 @login_required
 def stocks_list():
-    """전체 종목 리스트 API (페이지네이션, 검색, 실시간 가격 포함)"""
-    import yfinance as yf
-    import pandas as pd
-    import numpy as np
-
+    """전체 종목 리스트 API (캐시 기반)"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 30, type=int)
@@ -495,45 +573,17 @@ def stocks_list():
         user_favorites = UserFavorites.query.filter_by(user_id=current_user.get_id()).all()
         favorite_tickers = {fav.ticker for fav in user_favorites}
 
-        price_data = {}
-        if tickers:
-            yf_data = yf.download(tickers, period='2d', progress=False)
-            if not yf_data.empty:
-                for ticker in tickers:
-                    try:
-                        hist = yf_data['Close'][ticker]
-                        if len(hist) >= 2 and not hist.isnull().all():
-                            last_price = hist.iloc[-1]
-                            prev_close = hist.iloc[-2]
-                            
-                            # NaN 값 체크 및 변환
-                            if pd.isna(last_price) or pd.isna(prev_close):
-                                price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
-                                continue
-
-                            change = last_price - prev_close
-                            percent_change = (change / prev_close) * 100 if prev_close != 0 else 0
-                            
-                            price_data[ticker] = {
-                                'price': last_price,
-                                'change': change,
-                                'percent_change': percent_change
-                            }
-                        else:
-                            price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
-                    except (KeyError, IndexError):
-                        price_data[ticker] = {'price': None, 'change': None, 'percent_change': None}
-                        logger.warning(f'yfinance에서 {ticker} 데이터를 처리할 수 없습니다.')
+        price_data = get_prices_from_cache_or_fetch(tickers)
 
         results = []
         for stock in db_stocks:
-            data = price_data.get(stock.ticker, {'price': None, 'change': None, 'percent_change': None})
+            data = price_data.get(stock.ticker)
             results.append({
                 'ticker': stock.ticker,
                 'name': stock.name,
-                'price': data['price'],
-                'change': data['change'],
-                'percent_change': data['percent_change'],
+                'price': data.get('price') if data else None,
+                'change': data.get('change') if data else None,
+                'percent_change': data.get('percent_change') if data else None,
                 'is_favorite': stock.ticker in favorite_tickers
             })
 
@@ -619,6 +669,20 @@ def analysis_page():
     return render_template('analysis.html')
 
 
+@app.route('/models')
+@login_required
+def models_page():
+    """모델 관리 페이지"""
+    return render_template('models.html')
+
+
+@app.route('/portfolio')
+@login_required
+def portfolio_page():
+    """포트폴리오 페이지"""
+    return render_template('portfolio.html')
+
+
 @app.route('/stocks')
 @login_required
 def stocks_page():
@@ -626,35 +690,172 @@ def stocks_page():
     return render_template('stocks.html')
 
 
-@app.route('/dashboard')
+@app.route('/api/models/delete', methods=['POST'])
 @login_required
-def dashboard():
-    """사용자 대시보드"""
+def delete_model():
+    """모델 삭제 API"""
+    data = request.get_json()
+    filename = data.get('filename')
+    if not filename:
+        return jsonify({'status': 'error', 'message': 'Filename is required'}), 400
+
     try:
         user_id = current_user.get_id()
+        # IMPORTANT: Sanitize filename to prevent path traversal attacks
+        safe_filename = secure_filename(filename)
+        if safe_filename != filename:
+            return jsonify({'status': 'error', 'message': 'Invalid filename'}), 400
 
-        # 최근 모델 성과
-        recent_performances = ModelPerformance.query.filter_by(user_id=user_id) \
-            .order_by(ModelPerformance.analysis_date.desc()).limit(5).all()
+        user_models_dir = os.path.join("D:\\", "StockModelFolder", user_id)
+        
+        # Define file paths for the model and its related files
+        model_path = os.path.join(user_models_dir, safe_filename)
+        scaler_path = os.path.join(user_models_dir, safe_filename.replace('.zip', '_scaler.pkl'))
+        metadata_path = os.path.join(user_models_dir, safe_filename.replace('.zip', '_metadata.json'))
 
-        # 통계
-        total_analyses = ModelPerformance.query.filter_by(user_id=user_id).count()
-        avg_return = db.session.query(db.func.avg(ModelPerformance.total_return)) \
-                         .filter_by(user_id=user_id).scalar() or 0
+        files_to_delete = [model_path, scaler_path, metadata_path]
+        deleted_count = 0
 
-        stats = {
-            'total_analyses': total_analyses,
-            'avg_return': avg_return,
-            'recent_performances': recent_performances
-        }
+        for file_path in files_to_delete:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                deleted_count += 1
+                logger.info(f"Deleted file: {file_path}")
 
-        return render_template('dashboard.html', stats=stats)
+        if deleted_count > 0:
+            return jsonify({'status': 'success', 'message': f'{filename} and related files deleted.'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Model not found'}), 404
 
     except Exception as e:
-        logger.error(f"대시보드 로드 오류: {e}")
-        flash('대시보드를 불러오는 중 오류가 발생했습니다.', 'error')
-        return redirect(url_for('index'))
+        logger.error(f"모델 삭제 오류: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to delete model'}), 500
 
+
+@app.route('/api/portfolio/summary')
+@login_required
+def portfolio_summary():
+    """포트폴리오 요약 정보 API"""
+    user_id = current_user.get_id()
+    holdings = PortfolioHolding.query.filter_by(user_id=user_id).all()
+    
+    tickers = [h.ticker for h in holdings]
+    price_data = get_prices_from_cache_or_fetch(tickers)
+
+    results = []
+    for holding in holdings:
+        current_price_info = price_data.get(holding.ticker)
+        current_price = current_price_info.get('price') if current_price_info else None
+        
+        results.append({
+            'ticker': holding.ticker,
+            'quantity': holding.quantity,
+            'average_cost': holding.average_cost,
+            'current_price': current_price
+        })
+
+    return jsonify(results)
+
+
+@app.route('/api/portfolio/transactions')
+@login_required
+def portfolio_transactions():
+    """포트폴리오 거래 내역 API"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 15, type=int)
+    user_id = current_user.get_id()
+
+    paginated_txs = PortfolioTransaction.query.filter_by(user_id=user_id)\
+        .order_by(PortfolioTransaction.transaction_date.desc())\
+        .paginate(page=page, per_page=per_page, error_out=False)
+
+    results = [{
+        'ticker': tx.ticker,
+        'transaction_type': tx.transaction_type,
+        'quantity': tx.quantity,
+        'price': tx.price,
+        'transaction_date': tx.transaction_date.isoformat() + 'Z'
+    } for tx in paginated_txs.items]
+
+    return jsonify({
+        'transactions': results,
+        'pagination': {
+            'page': paginated_txs.page,
+            'per_page': paginated_txs.per_page,
+            'total_pages': paginated_txs.pages,
+            'total_items': paginated_txs.total
+        }
+    })
+
+
+@app.route('/api/portfolio/transact', methods=['POST'])
+@login_required
+def portfolio_transact():
+    """포트폴리오에 대한 매수/매도 거래를 처리합니다."""
+    data = request.get_json()
+    ticker = data.get('ticker')
+    quantity_str = data.get('quantity')
+    price_str = data.get('price')
+    transaction_type = data.get('transaction_type') # 'BUY' or 'SELL'
+
+    if not all([ticker, quantity_str, price_str, transaction_type]):
+        return jsonify({'status': 'error', 'message': 'Missing required transaction data.'}), 400
+    
+    try:
+        quantity = float(quantity_str)
+        price = float(price_str)
+    except (ValueError, TypeError):
+        return jsonify({'status': 'error', 'message': 'Invalid number format for quantity or price.'}), 400
+
+    if quantity <= 0:
+        return jsonify({'status': 'error', 'message': 'Quantity must be positive.'}), 400
+
+    user_id = current_user.get_id()
+
+    try:
+        if transaction_type == 'BUY':
+            holding = PortfolioHolding.query.filter_by(user_id=user_id, ticker=ticker).first()
+            if holding:
+                # 기존 보유 종목 매수: 평균 단가 재계산
+                new_total_cost = (holding.average_cost * holding.quantity) + (price * quantity)
+                new_quantity = holding.quantity + quantity
+                holding.average_cost = new_total_cost / new_quantity
+                holding.quantity = new_quantity
+            else:
+                # 신규 종목 매수
+                holding = PortfolioHolding(user_id=user_id, ticker=ticker, quantity=quantity, average_cost=price)
+                db.session.add(holding)
+
+        elif transaction_type == 'SELL':
+            holding = PortfolioHolding.query.filter_by(user_id=user_id, ticker=ticker).first()
+            if not holding or holding.quantity < quantity:
+                return jsonify({'status': 'error', 'message': 'Not enough shares to sell.'}), 400
+            
+            if holding.quantity - quantity < 0.0001: # 거의 모든 주식을 매도하는 경우
+                db.session.delete(holding)
+            else:
+                holding.quantity -= quantity
+
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid transaction type.'}), 400
+
+        # 거래 내역 기록
+        new_transaction = PortfolioTransaction(
+            user_id=user_id, 
+            ticker=ticker, 
+            transaction_type=transaction_type, 
+            quantity=quantity, 
+            price=price
+        )
+        db.session.add(new_transaction)
+        db.session.commit()
+
+        return jsonify({'status': 'success', 'message': f'{transaction_type} successful.'})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"거래 처리 오류: {e}")
+        return jsonify({'status': 'error', 'message': 'An error occurred during the transaction.'}), 500
 
 # --- 인증 관련 라우트들 ---
 
