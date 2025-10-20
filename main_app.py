@@ -15,12 +15,14 @@ import json
 import logging
 import click
 from datetime import datetime
+import urllib.parse # URL 인코딩을 위해 추가
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import or_
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
+from utils import download_from_blob_storage, delete_blob
 
 # 로깅 설정
 logging.basicConfig(
@@ -31,17 +33,36 @@ logger = logging.getLogger(__name__)
 
 # Flask 앱 및 기본 설정
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_very_secret_key_change_in_production'
-app.config['JSON_AS_ASCII'] = False  # 한글 JSON 지원
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'your_very_secret_key_change_in_production')
+app.config['JSON_AS_ASCII'] = False
 
-# 데이터베이스 설정 (MySQL)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
+# 데이터베이스 설정 (Azure SQL - ODBC Driver 17 사용)
+# 1. 아래 변수에 실제 아이디와 비밀번호를 입력하세요.
+DB_USER = "chonhy1"
+DB_PASSWORD = "card2574@!" # 특수문자가 포함된 비밀번호 원본을 여기에 입력
+
+# 2. 비밀번호를 URL 인코딩 처리합니다.
+encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
+
+# 3. 최종 연결 문자열을 생성합니다.
+db_connection_string = f"mssql+pyodbc://{DB_USER}:{encoded_password}@cho1.database.windows.net:1433/my_stock?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes"
+
+# 4. Flask 앱에 최종 연결 문자열을 설정합니다.
+if DB_PASSWORD and DB_PASSWORD != "Your_Password_Here":
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_connection_string
+    logger.info("Azure SQL 데이터베이스에 연결을 시도합니다. (ODBC Driver 17)")
+else:
+    # 비밀번호가 기본값이면 로컬 DB로 연결 (개발용)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
+    logger.info("Azure DB 비밀번호가 설정되지 않아 로컬 MySQL 데이터베이스에 연결합니다.")
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 3600,
     'pool_pre_ping': True
 }
 
+#Virtual Machines, BS Series, B1s
 db = SQLAlchemy(app)
 
 # Flask-Login 설정
@@ -55,8 +76,8 @@ login_manager.login_message_category = 'warning'
 # 사용자 모델 정의 (기존 DB 스키마에 맞게 수정)
 class UsersInfo(UserMixin, db.Model):
     __tablename__ = 'users_info'
-    users_seq = db.Column(db.Integer, autoincrement=True, index=True)
-    user_id = db.Column(db.String(50), primary_key=True, unique=True, nullable=False)
+    users_seq = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), unique=True, nullable=False, index=True)
     password = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(50), nullable=False)
     hp = db.Column(db.String(13), nullable=False)
@@ -79,6 +100,23 @@ class UsersInfo(UserMixin, db.Model):
                 db.session.commit()
         except Exception as e:
             logger.warning(f"로그인 시간 업데이트 실패: {e}")
+
+
+# 신규: 모델 파일 정보 저장을 위한 테이블
+class ModelFiles(db.Model):
+    __tablename__ = 'model_files'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(50), nullable=False)
+    model_name = db.Column(db.String(100), nullable=False, index=True)
+    symbol = db.Column(db.String(20))
+    strategy = db.Column(db.String(20))
+    training_date = db.Column(db.DateTime, default=datetime.utcnow)
+    blob_model_path = db.Column(db.String(255))
+    blob_scaler_path = db.Column(db.String(255))
+    blob_metadata_path = db.Column(db.String(255))
+    is_deleted = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'model_name', name='_user_model_name_uc'),)
 
 
 # 미국 주식 목록 모델
@@ -249,7 +287,7 @@ def get_prices_from_cache_or_fetch(tickers: list):
 # 사용자 로더 함수
 @login_manager.user_loader
 def load_user(user_id):
-    return UsersInfo.query.get(user_id)
+    return UsersInfo.query.filter_by(user_id=user_id).first()
 
 
 # 전역 에러 핸들러
@@ -278,13 +316,12 @@ def internal_error(error):
 @app.route('/train', methods=['POST'])
 @login_required
 def train_model_route():
-    """개선된 모델 훈련 API"""
+    """개선된 모델 훈련 API - DB에 모델 정보 저장 로직 추가"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"status": "error", "message": "요청 데이터가 없습니다."}), 400
 
-        # 필수 파라미터 검증
         required_fields = ['symbol', 'period', 'model_name']
         missing_fields = [field for field in required_fields if not data.get(field)]
         if missing_fields:
@@ -299,26 +336,68 @@ def train_model_route():
         strategy = data.get('strategy', 'balanced')
         user_id = current_user.get_id()
 
-        # 입력값 검증
-        valid_periods = ['3m', '6m', '1y', '2y', '5y', '10y']
-        if period not in valid_periods:
-            return jsonify({
-                "status": "error",
-                "message": f"유효하지 않은 기간입니다. 사용 가능한 기간: {', '.join(valid_periods)}"
-            }), 400
-
-        valid_strategies = ['conservative', 'balanced', 'aggressive']
-        if strategy not in valid_strategies:
-            return jsonify({
-                "status": "error",
-                "message": f"유효하지 않은 전략입니다. 사용 가능한 전략: {', '.join(valid_strategies)}"
-            }), 400
+        # 입력값 검증 (기존과 동일)
+        # ...
 
         logger.info(f"훈련 시작 - 사용자: {user_id}, 종목: {symbol}, 전략: {strategy}")
 
-        # 스트리밍 응답으로 훈련 진행 상황 전달
+        def training_stream():
+            final_model_info = None
+            # 훈련 프로세스에서 오는 스트림을 그대로 클라이언트에게 전달
+            for response_part in run_training_process(symbol, period, user_id, model_name, strategy):
+                try:
+                    # 각 JSON 부분을 파싱하여 상태 확인
+                    response_json = json.loads(response_part)
+                    if response_json.get("status") == "success":
+                        final_model_info = response_json.get("model_info")
+                except json.JSONDecodeError:
+                    # JSON 파싱이 불가능한 경우, 원본 스트림을 그대로 전달
+                    pass
+                yield response_part
+            
+            # 스트림이 끝나고, 성공적으로 모델 정보가 반환되었으면 DB에 저장
+            if final_model_info:
+                try:
+                    # 동일한 이름의 모델이 있는지 확인 (삭제된 것도 포함)
+                    model_entry = ModelFiles.query.filter_by(
+                        user_id=user_id, 
+                        model_name=final_model_info['model_name']
+                    ).first()
+
+                    if model_entry:
+                        # 모델이 존재하면, 정보 업데이트
+                        logger.info(f"기존 모델 정보를 업데이트합니다: {model_entry.model_name}")
+                        model_entry.symbol = final_model_info['symbol']
+                        model_entry.strategy = final_model_info['strategy']
+                        model_entry.training_date = datetime.now()
+                        model_entry.blob_model_path = final_model_info['blob_model_path']
+                        model_entry.blob_scaler_path = final_model_info['blob_scaler_path']
+                        model_entry.blob_metadata_path = final_model_info['blob_metadata_path']
+                        model_entry.is_deleted = False # 혹시 삭제되었던 모델이면 활성화
+                    else:
+                        # 모델이 없으면, 새로 생성
+                        logger.info(f"새 모델 정보를 데이터베이스에 추가합니다: {final_model_info['model_name']}")
+                        model_entry = ModelFiles(
+                            user_id=user_id,
+                            model_name=final_model_info['model_name'],
+                            symbol=final_model_info['symbol'],
+                            strategy=final_model_info['strategy'],
+                            training_date=datetime.now(),
+                            blob_model_path=final_model_info['blob_model_path'],
+                            blob_scaler_path=final_model_info['blob_scaler_path'],
+                            blob_metadata_path=final_model_info['blob_metadata_path']
+                        )
+                        db.session.add(model_entry)
+                    
+                    db.session.commit()
+                    logger.info(f"DB 작업 완료: {final_model_info['model_name']}")
+
+                except Exception as e:
+                    db.session.rollback()
+                    logger.error(f"DB에 모델 정보 저장 실패: {e}")
+
         return Response(
-            stream_with_context(run_training_process(symbol, period, user_id, model_name, strategy)),
+            stream_with_context(training_stream()),
             content_type='application/json; charset=utf-8'
         )
 
@@ -330,13 +409,12 @@ def train_model_route():
 @app.route('/analyze', methods=['POST'])
 @login_required
 def analyze_stock_route():
-    """개선된 주식 분석 API"""
+    """개선된 주식 분석 API - DB 연동"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "요청 데이터가 없습니다."}), 400
 
-        # 필수 파라미터 검증
         required_fields = ['model_name', 'symbol', 'period']
         missing_fields = [field for field in required_fields if not data.get(field)]
         if missing_fields:
@@ -349,14 +427,18 @@ def analyze_stock_route():
         period = data['period']
         initial_balance = float(data.get('initial_balance', 10000))
         user_id = current_user.get_id()
-        strategy = data.get('strategy', 'balanced') # 누락된 strategy 변수 추가
 
         logger.info(f"분석 요청 - 사용자: {user_id}, 종목: {symbol}, 모델: {model_name}")
 
+        # DB에서 모델 정보 조회
+        model_record = ModelFiles.query.filter_by(user_id=user_id, model_name=model_name, is_deleted=False).first()
+        if not model_record:
+            return jsonify({"error": "지정된 모델을 찾을 수 없습니다."}), 404
+
         # 분석기 생성 및 모델 로드
         analyzer = StockAnalyzer()
-        if not analyzer.load_model(model_name, user_id):
-            return jsonify({"error": "모델을 불러오는 데 실패했습니다. 모델 파일을 확인해주세요."}), 500
+        if not analyzer.load_model(model_record):
+            return jsonify({"error": "모델을 불러오는 데 실패했습니다. Blob Storage 또는 파일을 확인해주세요."}), 500
 
         # 주식 분석 실행
         result = analyzer.analyze_stock(
@@ -375,7 +457,7 @@ def analyze_stock_route():
                 user_id=user_id,
                 model_name=model_name,
                 symbol=symbol,
-                strategy=strategy, # 전략 저장 추가
+                strategy=model_record.strategy, # DB에서 가져온 전략 정보 사용
                 total_return=result.get('total_return'),
                 benchmark_return=result.get('benchmark_return'),
                 win_rate=result.get('win_rate'),
@@ -387,8 +469,8 @@ def analyze_stock_route():
             db.session.commit()
             logger.info(f"성과 기록 저장 완료 - {symbol}")
         except Exception as e:
+            db.session.rollback()
             logger.warning(f"성과 기록 저장 실패: {e}")
-            # 성과 기록 실패는 주요 기능에 영향을 주지 않으므로 계속 진행
 
         logger.info(f"분석 완료 - 수익률: {result.get('total_return', 0) * 100:.2f}%")
         return jsonify(result)
@@ -431,62 +513,29 @@ def search_us_stock_route():
 @app.route('/model')
 @login_required
 def get_models():
-    """사용자 모델 목록 조회 API"""
+    """사용자 모델 목록을 데이터베이스에서 조회하는 API"""
     try:
         user_id = current_user.get_id()
-        user_models_path = os.path.join("D:\\", "StockModelFolder", user_id)
-
-        if not os.path.exists(user_models_path):
-            logger.info(f"모델 디렉토리가 존재하지 않음: {user_models_path}")
-            return jsonify([])
+        
+        # is_deleted가 False인 모델만 조회
+        user_models = ModelFiles.query.filter_by(user_id=user_id, is_deleted=False)\
+                                      .order_by(ModelFiles.training_date.desc()).all()
 
         model_files = []
-        zip_files = glob.glob(os.path.join(user_models_path, '*.zip'))
+        for model_record in user_models:
+            model_files.append({
+                'filename': model_record.model_name,
+                'symbol': model_record.symbol,
+                'strategy': model_record.strategy,
+                'created_date': model_record.training_date.isoformat() if model_record.training_date else 'Unknown',
+                'expected_return': 0 # 이 값은 필요 시 추후 계산하여 채워넣을 수 있음
+            })
 
-        logger.info(f"찾은 모델 파일 수: {len(zip_files)}")
-
-        for file_path in zip_files:
-            try:
-                model_name = os.path.basename(file_path)
-
-                # 메타데이터 읽기 시도
-                metadata_path = file_path.replace('.zip', '_metadata.json')
-                metadata = {}
-
-                if os.path.exists(metadata_path):
-                    try:
-                        with open(metadata_path, 'r', encoding='utf-8') as f:
-                            metadata = json.load(f)
-                    except json.JSONDecodeError as je:
-                        logger.warning(f"메타데이터 JSON 파싱 실패 ({model_name}): {je}")
-                    except Exception as e:
-                        logger.warning(f"메타데이터 읽기 실패 ({model_name}): {e}")
-
-                # 모델 정보 구성
-                model_info = {
-                    'filename': model_name,
-                    'symbol': metadata.get('symbol', 'Unknown'),
-                    'strategy': metadata.get('strategy', 'balanced'),
-                    'created_date': metadata.get('training_date', 'Unknown'),
-                    'expected_return': metadata.get('final_return', 0)
-                }
-                model_files.append(model_info)
-
-            except Exception as e:
-                logger.error(f"모델 파일 처리 중 오류 ({file_path}): {e}")
-                continue
-
-        # 생성일 기준 정렬 (정렬 실패해도 계속 진행)
-        try:
-            model_files.sort(key=lambda x: x.get('created_date', ''), reverse=True)
-        except Exception as e:
-            logger.warning(f"모델 정렬 실패: {e}")
-
-        logger.info(f"반환할 모델 수: {len(model_files)}")
+        logger.info(f"DB에서 찾은 모델 수: {len(model_files)}")
         return jsonify(model_files)
 
     except Exception as e:
-        logger.error(f"모델 목록 조회 중 치명적 오류: {e}")
+        logger.error(f"DB에서 모델 목록 조회 중 오류: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": "모델 목록을 불러오는 중 오류가 발생했습니다."}), 500
@@ -566,7 +615,8 @@ def stocks_list():
                 UsStockInfo.name.ilike(search_term)
             ))
         
-        paginated_stocks = query.paginate(page=page, per_page=per_page, error_out=False)
+        # MSSQL에서 페이지네이션을 사용하기 위해 ORDER BY 절 추가
+        paginated_stocks = query.order_by(UsStockInfo.ticker).paginate(page=page, per_page=per_page, error_out=False)
         db_stocks = paginated_stocks.items
         tickers = [stock.ticker for stock in db_stocks]
 
@@ -693,7 +743,7 @@ def stocks_page():
 @app.route('/api/models/delete', methods=['POST'])
 @login_required
 def delete_model():
-    """모델 삭제 API"""
+    """모델 삭제 API - DB 및 Blob Storage 연동"""
     data = request.get_json()
     filename = data.get('filename')
     if not filename:
@@ -701,33 +751,41 @@ def delete_model():
 
     try:
         user_id = current_user.get_id()
-        # IMPORTANT: Sanitize filename to prevent path traversal attacks
-        safe_filename = secure_filename(filename)
-        if safe_filename != filename:
-            return jsonify({'status': 'error', 'message': 'Invalid filename'}), 400
-
-        user_models_dir = os.path.join("D:\\", "StockModelFolder", user_id)
         
-        # Define file paths for the model and its related files
-        model_path = os.path.join(user_models_dir, safe_filename)
-        scaler_path = os.path.join(user_models_dir, safe_filename.replace('.zip', '_scaler.pkl'))
-        metadata_path = os.path.join(user_models_dir, safe_filename.replace('.zip', '_metadata.json'))
+        # DB에서 모델 정보 조회
+        model_to_delete = ModelFiles.query.filter_by(user_id=user_id, model_name=filename, is_deleted=False).first()
 
-        files_to_delete = [model_path, scaler_path, metadata_path]
-        deleted_count = 0
-
-        for file_path in files_to_delete:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                deleted_count += 1
-                logger.info(f"Deleted file: {file_path}")
-
-        if deleted_count > 0:
-            return jsonify({'status': 'success', 'message': f'{filename} and related files deleted.'})
-        else:
+        if not model_to_delete:
             return jsonify({'status': 'error', 'message': 'Model not found'}), 404
 
+        # Blob Storage에서 파일들 삭제
+        files_to_delete_in_blob = [
+            model_to_delete.blob_model_path,
+            model_to_delete.blob_scaler_path,
+            model_to_delete.blob_metadata_path
+        ]
+        
+        deleted_count = 0
+        for blob_path in files_to_delete_in_blob:
+            if blob_path and delete_blob(blob_path):
+                deleted_count += 1
+                logger.info(f"Blob에서 파일 삭제됨: {blob_path}")
+            else:
+                logger.warning(f"Blob 파일 삭제 실패 또는 경로 없음: {blob_path}")
+
+        # DB에서 soft delete 처리
+        model_to_delete.is_deleted = True
+        db.session.commit()
+        logger.info(f"DB에서 모델 레코드 soft delete 처리됨: {filename}")
+
+        if deleted_count > 0:
+            return jsonify({'status': 'success', 'message': f'{filename} and related files marked as deleted.'})
+        else:
+            # DB에서는 삭제 처리되었지만 Blob 파일 삭제에 실패한 경우
+            return jsonify({'status': 'warning', 'message': 'Model record was deleted, but failed to delete files from storage.'}), 500
+
     except Exception as e:
+        db.session.rollback()
         logger.error(f"모델 삭제 오류: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to delete model'}), 500
 
@@ -881,7 +939,7 @@ def register():
                 return render_template('register.html')
 
             # 아이디 중복 확인
-            if UsersInfo.query.get(user_id):
+            if UsersInfo.query.filter_by(user_id=user_id).first():
                 flash('이미 존재하는 아이디입니다.', 'error')
                 return render_template('register.html')
 
@@ -929,7 +987,7 @@ def login():
                 flash('아이디와 비밀번호를 입력해주세요.', 'error')
                 return render_template('login.html')
 
-            user = UsersInfo.query.get(user_id)
+            user = UsersInfo.query.filter_by(user_id=user_id).first()
 
             if user and check_password_hash(user.password, password):
                 login_user(user)

@@ -771,6 +771,15 @@
             resultsDiv.style.display = 'block';
         }
 
+        let isTraining = false;
+
+        function beforeUnloadHandler(e) {
+            if (isTraining) {
+                e.preventDefault();
+                e.returnValue = ''; // Chrome requires returnValue to be set.
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             loadModels();
             
@@ -835,6 +844,9 @@
 
             document.getElementById('trainForm').addEventListener('submit', async function(e) {
                 e.preventDefault();
+                isTraining = true;
+                window.addEventListener('beforeunload', beforeUnloadHandler);
+
                 const buttonId = 'trainBtn';
                 const logContainer = document.getElementById('trainingLogContainer');
                 const logDiv = document.getElementById('trainingLog');
@@ -855,6 +867,8 @@
                 
                 if (!payload.symbol || !payload.model_name) {
                     button.disabled = false;
+                    isTraining = false;
+                    window.removeEventListener('beforeunload', beforeUnloadHandler);
                     return showMessage('훈련할 종목 코드와 모델 이름을 모두 입력해주세요.');
                 }
 
@@ -907,6 +921,8 @@
                     showMessage('훈련 중 오류가 발생했습니다: ' + err.message);
                 } finally {
                     button.disabled = false;
+                    isTraining = false;
+                    window.removeEventListener('beforeunload', beforeUnloadHandler);
                 }
             });
         });

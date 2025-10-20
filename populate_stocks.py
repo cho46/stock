@@ -6,11 +6,26 @@ from sqlalchemy.ext.declarative import declarative_base
 import logging
 import os
 
+import urllib.parse
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- 설정 --- #
-DB_URI = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
+# 1. 아래 변수에 실제 아이디와 비밀번호를 입력하세요.
+DB_USER = "chonhy1"
+DB_PASSWORD = "card2574@!" # 특수문자가 포함된 비밀번호 원본을 여기에 입력
+
+# 2. 비밀번호를 URL 인코딩 처리합니다.
+encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
+
+# 3. 최종 연결 문자열을 생성합니다.
+DB_URI = f"mssql+pyodbc://{DB_USER}:{encoded_password}@cho1.database.windows.net:1433/my_stock?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes"
+
+# 4. 비밀번호가 기본값인지 확인합니다.
+if DB_PASSWORD == "Your_Password_Here":
+    raise ValueError("populate_stocks.py 스크립트의 DB_PASSWORD 변수에 실제 비밀번호를 설정해야 합니다.")
+
 TABLE_NAME = 'us_stock_info'
 # 로컬 파일 이름
 NASDAQ_FILENAME = 'nasdaq-listed.csv'
@@ -62,31 +77,43 @@ def populate_database(df):
         return
 
     engine = create_engine(DB_URI)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+
+    # --- 연결 테스트 추가 ---
+    try:
+        logging.info("데이터베이스 연결 테스트 중...")
+        connection = engine.connect()
+        logging.info("데이터베이스 연결 성공!")
+    except Exception as e:
+        logging.error(f"데이터베이스 연결에 실패했습니다. 스크립트를 중단합니다.")
+        logging.error(f"오류 상세 정보: {e}")
+        return # 연결 실패 시 함수 종료
+    # ----------------------
 
     try:
-        logging.info(f"기존 테이블 '{TABLE_NAME}'의 데이터를 삭제합니다...")
-        session.execute(text(f"TRUNCATE TABLE {TABLE_NAME}"))
-        
-        logging.info(f"{len(df)}개의 종목을 데이터베이스에 삽입합니다...")
-        # 사용자의 코드에서 제안한 효율적인 merge 방식 사용
-        for _, row in df.iterrows():
-            ticker_obj = UsStockInfo(
-                ticker=row["ticker"],
-                name=row["name"],
-                exchange=row["exchange"]
+        with engine.connect() as connection:
+            logging.info(f"기존 테이블 '{TABLE_NAME}'의 데이터를 삭제합니다...")
+            # 트랜잭션 내에서 TRUNCATE 실행
+            with connection.begin():
+                connection.execute(text(f"TRUNCATE TABLE {TABLE_NAME}"))
+            
+            logging.info(f"{len(df)}개의 종목을 데이터베이스에 효율적으로 삽입합니다...")
+            
+            # to_sql을 사용하여 대량 데이터 빠르게 삽입
+            df.to_sql(
+                TABLE_NAME,
+                con=connection,
+                if_exists='append',
+                index=False,
+                chunksize=1000  # 1000개 행 단위로 끊어서 삽입
             )
-            session.merge(ticker_obj)
-
-        session.commit()
-        logging.info("데이터베이스 채우기 완료!")
+            
+            logging.info("데이터베이스 채우기 완료!")
 
     except Exception as e:
         logging.error(f"데이터베이스 작업 중 오류 발생: {e}")
-        session.rollback()
     finally:
-        session.close()
+        # 연결은 with 구문이 끝나면서 자동으로 닫힘
+        pass
 
 if __name__ == '__main__':
     logging.info("로컬 파일로부터 주식 목록 데이터베이스 채우기 스크립트를 시작합니다.")

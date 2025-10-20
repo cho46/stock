@@ -12,6 +12,8 @@ import logging
 from datetime import datetime, timedelta
 import warnings
 import gymnasium as gym
+from azure.storage.blob import BlobServiceClient
+import os
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -244,7 +246,8 @@ def calculate_cci(df, period=20):
     """CCI (Commodity Channel Index) 계산"""
     typical_price = (df['High'] + df['Low'] + df['Close']) / 3
     sma = typical_price.rolling(window=period).mean()
-    mad = typical_price.rolling(window=period).apply(lambda x: pd.Series(x).mad())
+    # pandas 2.0에서 mad()가 제거되어 수동으로 계산
+    mad = typical_price.rolling(window=period).apply(lambda x: (x - x.mean()).abs().mean())
 
     return (typical_price - sma) / (0.015 * mad)
 
@@ -379,3 +382,58 @@ class ResetFixWrapper(gym.Wrapper):
 
     def step(self, action):
         return self.env.step(action)
+
+# --- Azure Blob Storage Functions ---
+
+def get_blob_service_client():
+    """환경 변수에서 연결 문자열을 가져와 BlobServiceClient를 생성합니다."""
+    connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+    if not connect_str:
+        raise ValueError("AZURE_STORAGE_CONNECTION_STRING 환경 변수를 설정해야 합니다.")
+    return BlobServiceClient.from_connection_string(connect_str)
+
+def upload_to_blob_storage(local_file_path, blob_name):
+    """로컬 파일을 Azure Blob Storage에 업로드합니다."""
+    try:
+        blob_service_client = get_blob_service_client()
+        container_name = "models"
+        
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        
+        with open(local_file_path, "rb") as data:
+            blob_client.upload_blob(data, overwrite=True)
+        logger.info(f"'{local_file_path}'를 '{blob_name}'으로 성공적으로 업로드했습니다.")
+        return True
+    except Exception as e:
+        logger.error(f"Blob Storage 업로드 실패: {e}")
+        return False
+
+def download_from_blob_storage(blob_name, local_file_path):
+    """Azure Blob Storage에서 파일을 다운로드합니다."""
+    try:
+        blob_service_client = get_blob_service_client()
+        container_name = "models"
+            
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        
+        with open(local_file_path, "wb") as download_file:
+            download_file.write(blob_client.download_blob().readall())
+        logger.info(f"'{blob_name}'을 '{local_file_path}'으로 성공적으로 다운로드했습니다.")
+        return True
+    except Exception as e:
+        logger.error(f"Blob Storage 다운로드 실패: {e}")
+        return False
+
+def delete_blob(blob_name):
+    """Azure Blob Storage에서 파일을 삭제합니다."""
+    try:
+        blob_service_client = get_blob_service_client()
+        container_name = "models"
+        
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        blob_client.delete_blob()
+        logger.info(f"'{blob_name}'을 성공적으로 삭제했습니다.")
+        return True
+    except Exception as e:
+        logger.error(f"Blob 삭제 실패: {e}")
+        return False

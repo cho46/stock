@@ -17,11 +17,11 @@ from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnRewardThreshold
 from sklearn.preprocessing import RobustScaler
 
 from analysis import ImprovedStockTradingEnv
-from utils import download_stock_data, add_advanced_technical_indicators, ResetFixWrapper
+from utils import download_stock_data, add_advanced_technical_indicators, ResetFixWrapper, upload_to_blob_storage
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -93,28 +93,44 @@ def run_training_process(symbol, period, user_id, model_name, strategy: str = 'b
         eval_env = DummyVecEnv([lambda: ResetFixWrapper(Monitor(ImprovedStockTradingEnv(val_df)))])
         model = PPO('MlpPolicy', train_env, verbose=0, **params)
 
-        reward_threshold = 1.5
-        callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=reward_threshold, verbose=1)
-        callback_on_best.training_stopped = False
-        eval_callback = EvalCallback(eval_env, best_model_save_path=None, log_path=None, eval_freq=2000, deterministic=True, render=False, callback_on_new_best=callback_on_best)
+        # 평가 콜백 설정 (조기 종료 로직 제거)
+        eval_callback = EvalCallback(eval_env, best_model_save_path=None, log_path=None, eval_freq=2000, deterministic=True, render=False)
 
         total_timesteps = 50000
-        yield json.dumps({"status": "progress_update", "percentage": 50, "message": f"총 {total_timesteps} 스텝의 모델 훈련을 시작합니다..."}) + '\n'
-        model.learn(total_timesteps=total_timesteps, callback=eval_callback, progress_bar=False)
+        n_chunks = 100
+        chunk_steps = total_timesteps // n_chunks
 
-        yield json.dumps({"status": "progress_update", "percentage": 90, "message": "모델 및 관련 파일 저장 중..."}) + '\n'
-        user_models_dir = os.path.join("D:\\", "StockModelFolder", user_id)
-        os.makedirs(user_models_dir, exist_ok=True)
+        yield json.dumps({"status": "progress_update", "percentage": 50, "message": f"총 {total_timesteps} 스텝의 모델 훈련을 시작합니다..."}) + '\n'
+        
+        for i in range(n_chunks):
+            model.learn(total_timesteps=chunk_steps, callback=eval_callback, reset_num_timesteps=False, progress_bar=False)
+
+            # 진행률 업데이트 (50% ~ 90%)
+            percentage = 50 + int(40 * (i + 1) / n_chunks)
+            yield json.dumps({
+                "status": "progress_update", 
+                "percentage": percentage, 
+                "message": f"훈련 진행 중... ({model.num_timesteps}/{total_timesteps})"
+            }) + '\n'
+
+            yield json.dumps({"status": "progress_update", "percentage": 90, "message": "목표 보상에 도달하여 훈련을 조기 종료했습니다." }) + '\n'
+
+        yield json.dumps({"status": "progress_update", "percentage": 90, "message": "모델 및 관련 파일 저장 및 업로드 중..."}) + '\n'
+        
+        # 로컬 임시 저장 경로 설정
+        temp_dir = os.path.join("temp", user_id)
+        os.makedirs(temp_dir, exist_ok=True)
+        
         sanitized_model_name = "".join(c for c in model_name if c.isalnum() or c in ('_', '-')).rstrip() or f"{symbol}_{strategy}_model"
         
-        model_path = os.path.join(user_models_dir, f"{sanitized_model_name}.zip")
-        scaler_path = os.path.join(user_models_dir, f"{sanitized_model_name}_scaler.pkl")
-        metadata_path = os.path.join(user_models_dir, f"{sanitized_model_name}_metadata.json")
+        local_model_path = os.path.join(temp_dir, f"{sanitized_model_name}.zip")
+        local_scaler_path = os.path.join(temp_dir, f"{sanitized_model_name}_scaler.pkl")
+        local_metadata_path = os.path.join(temp_dir, f"{sanitized_model_name}_metadata.json")
 
-        model.save(model_path)
-        joblib.dump(scaler, scaler_path)
+        model.save(local_model_path)
+        joblib.dump(scaler, local_scaler_path)
 
-        # 메타데이터 저장
+        # 메타데이터 생성
         metadata = {
             'symbol': symbol,
             'strategy': strategy,
@@ -122,11 +138,44 @@ def run_training_process(symbol, period, user_id, model_name, strategy: str = 'b
             'total_timesteps': total_timesteps,
             'final_return': 0 # 이 값은 백테스팅 후 업데이트 될 수 있습니다.
         }
-        with open(metadata_path, 'w', encoding='utf-8') as f:
+        with open(local_metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, ensure_ascii=False, indent=4)
 
-        yield json.dumps({"status": "success", "percentage": 100, "message": f"모델 훈련 완료: {sanitized_model_name}"}) + '\n'
+        # Azure Blob Storage에 업로드
+        blob_model_name = f"{user_id}/{sanitized_model_name}.zip"
+        blob_scaler_name = f"{user_id}/{sanitized_model_name}_scaler.pkl"
+        blob_metadata_name = f"{user_id}/{sanitized_model_name}_metadata.json"
 
+        model_uploaded = upload_to_blob_storage(local_model_path, blob_model_name)
+        scaler_uploaded = upload_to_blob_storage(local_scaler_path, blob_scaler_name)
+        metadata_uploaded = upload_to_blob_storage(local_metadata_path, blob_metadata_name)
+
+        # 로컬 임시 파일 삭제
+        try:
+            os.remove(local_model_path)
+            os.remove(local_scaler_path)
+            os.remove(local_metadata_path)
+        except OSError as e:
+            logger.warning(f"로컬 임시 파일 삭제 실패: {e}")
+
+        if not all([model_uploaded, scaler_uploaded, metadata_uploaded]):
+            yield json.dumps({"status": "error", "message": "Azure Blob Storage에 모델 업로드를 실패했습니다."}) + '\n'
+            return
+
+        # 성공 시, 데이터베이스에 저장할 정보를 포함하여 반환
+        yield json.dumps({
+            "status": "success", 
+            "percentage": 100, 
+            "message": f"모델 훈련 및 업로드 완료: {sanitized_model_name}",
+            "model_info": {
+                "model_name": sanitized_model_name,
+                "symbol": symbol,
+                "strategy": strategy,
+                "blob_model_path": blob_model_name,
+                "blob_scaler_path": blob_scaler_name,
+                "blob_metadata_path": blob_metadata_name
+            }
+        }) + '\n'
     except Exception as e:
         logger.error(f"훈련 중 치명적 오류 발생: {e}")
         import traceback

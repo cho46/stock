@@ -18,7 +18,7 @@ from typing import Dict
 from stable_baselines3 import PPO
 from sklearn.preprocessing import RobustScaler
 
-from utils import download_stock_data, add_technical_indicators
+from utils import download_stock_data, add_technical_indicators, download_from_blob_storage
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,11 @@ class ImprovedStockTradingEnv(gym.Env):
     """개선된 주식 거래 환경 - 더 현실적인 거래 로직과 보상 시스템"""
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, df, initial_balance=10000, lookback_window=20,
-                 transaction_cost=0.002, max_position_ratio=1.0):
+    def __init__(self, df,
+                 initial_balance=1000000,  # 변경: 10000 -> 1000000 (100만원)
+                 lookback_window=30,  # 변경: 20 -> 30 (더 긴 추세 파악)
+                 transaction_cost=0.003,  # 변경: 0.002 -> 0.003 (한국 주식 거래비용)
+                 max_position_ratio=0.8):  # 변경: 1.0 -> 0.8 (리스크 관리)
         super().__init__()
         if len(df) < lookback_window + 10:
             raise ValueError("데이터가 너무 짧습니다.")
@@ -39,6 +42,10 @@ class ImprovedStockTradingEnv(gym.Env):
         self.transaction_cost = transaction_cost
         self.max_position_ratio = max_position_ratio
         self.trade_history = []
+
+        # 추가 리스크 관리 파라미터 (신규)
+        self.min_trade_amount = 10000  # 최소 거래 금액 1만원
+        self.stop_loss_ratio = 0.15  # 15% 손실 시 손절 (변경: 0.7 -> 0.15)
 
         # 액션 공간: 0=강매도, 1=매도, 2=보유, 3=매수, 4=강매수
         self.action_space = spaces.Discrete(5)
@@ -59,6 +66,7 @@ class ImprovedStockTradingEnv(gym.Env):
         self.total_trades = 0
         self.consecutive_holds = 0
         self.last_action = 2  # Start with hold
+        self.last_trade_price = 0  # 추가: 마지막 거래 가격 초기화
         self.trade_history = []
 
         # 성과 추적 변수들
@@ -66,6 +74,8 @@ class ImprovedStockTradingEnv(gym.Env):
         self.drawdown = 0.0
         self.winning_trades = 0
         self.losing_trades = 0
+        self.consecutive_losses = 0  # 신규: 연속 손실 추적
+
         return self._get_observation(), self._get_info()
 
     def _get_observation(self):
@@ -215,32 +225,38 @@ class ImprovedStockTradingEnv(gym.Env):
         # 개선된 보상 함수
         portfolio_return = (self.net_worth - prev_net_worth) / prev_net_worth if prev_net_worth > 0 else 0
 
-        # 추가 보상/페널티 요소들
-        trading_penalty = -0.001 if abs(self.shares_held - prev_shares) > 0 else 0  # 거래 비용
-        hold_bonus = 0.0001 if action == 2 and self.shares_held > 0 else 0  # 보유 보너스
-        risk_penalty = -max(0, self.drawdown - 0.1) * 0.01  # 큰 드로우다운 페널티
+        # 추가 보상/페널티 요소들 (가중치 조정)
+        trading_penalty = -0.002 if abs(self.shares_held - prev_shares) > 0 else 0  # 변경: -0.001 -> -0.002
+        hold_bonus = 0.0003 if action == 2 and self.shares_held > 0 else 0  # 변경: 0.0001 -> 0.0003
+        risk_penalty = -max(0, self.drawdown - 0.05) * 0.05  # 변경: 0.1 -> 0.05, 계수 0.01 -> 0.05
+
+        # 연속 손실 페널티 추가 (신규)
+        loss_streak_penalty = -0.001 * min(self.consecutive_losses, 5)
 
         # 샤프 비율 고려 보상 (변동성 대비 수익률)
-        if self.current_step >= 20:
+        if self.current_step >= self.lookback_window:  # 변경: 20 -> lookback_window
             recent_returns = pd.Series([self.net_worth]).pct_change().dropna()
             if len(recent_returns) > 0 and recent_returns.std() > 0:
-                sharpe_bonus = (recent_returns.mean() / recent_returns.std()) * 0.001
+                sharpe_bonus = (recent_returns.mean() / recent_returns.std()) * 0.002  # 변경: 0.001 -> 0.002
             else:
                 sharpe_bonus = 0
         else:
             sharpe_bonus = 0
 
-        reward = portfolio_return + trading_penalty + hold_bonus + risk_penalty + sharpe_bonus
+        reward = portfolio_return + trading_penalty + hold_bonus + risk_penalty + sharpe_bonus + loss_streak_penalty
 
-        # 종료 조건 (70% 손실 시 종료)
+        # 종료 조건 (현실적인 손절 기준 적용)
+        stop_loss_threshold = self.initial_balance * (1 - self.stop_loss_ratio)  # 15% 손실
         done = (self.current_step >= len(self.df) - 1 or
-                self.net_worth < self.initial_balance * 0.3)
+                self.net_worth < stop_loss_threshold)  # 변경: 0.3 -> stop_loss_threshold
 
         return self._get_observation(), reward, done, False, self._get_info()
 
     def _execute_action(self, action):
         """개선된 액션 실행 로직 - 5단계 액션"""
-        current_price = self.df.iloc[min(self.current_step, len(self.df) - 1)]['Close']
+        # 거래는 다음 날 시가(Open)에 체결되는 것으로 가정
+        trade_step = min(self.current_step + 1, len(self.df) - 1)
+        current_price = self.df.iloc[trade_step]['Open']
 
         if 'Date' in self.df.columns:
             current_date = self.df.iloc[min(self.current_step, len(self.df) - 1)]['Date']
@@ -264,18 +280,34 @@ class ImprovedStockTradingEnv(gym.Env):
         elif action == 2:  # 보유
             self.consecutive_holds += 1
 
-        elif action == 3:  # 매수 - 현금의 30% 투자
-            if self.balance > 100:  # 최소 거래 금액
-                self._buy_shares(0.3, current_price, current_date)
+        elif action == 3:  # 매수 - 현금의 25% 투자 (변경: 0.3 -> 0.25)
+            if self.balance > self.min_trade_amount:  # 변경: 100 -> min_trade_amount
+                self._buy_shares(0.25, current_price, current_date)
 
-        elif action == 4:  # 강매수 - 현금의 70% 투자
-            if self.balance > 100:
-                self._buy_shares(0.7, current_price, current_date)
+        elif action == 4:  # 강매수 - 현금의 50% 투자 (변경: 0.7 -> 0.5)
+            if self.balance > self.min_trade_amount:  # 변경: 100 -> min_trade_amount
+                self._buy_shares(0.50, current_price, current_date)
 
     def _buy_shares(self, ratio, price, date):
-        """매수 실행 함수"""
+        """매수 실행 함수 - 최대 포지션 제한 추가"""
         self.consecutive_holds = 0
-        investment = self.balance * ratio
+
+        # 최대 포지션 비율 확인 (신규)
+        current_position_value = self.shares_held * price
+        total_value = self.balance + current_position_value
+        current_position_ratio = current_position_value / total_value if total_value > 0 else 0
+
+        # 최대 포지션을 초과하지 않도록 조정
+        if current_position_ratio >= self.max_position_ratio:
+            return  # 이미 최대 포지션 도달
+
+        max_additional_investment = (self.max_position_ratio - current_position_ratio) * total_value
+        investment = min(self.balance * ratio, max_additional_investment)
+
+        # 최소 거래 금액 확인 (신규)
+        if investment < self.min_trade_amount:
+            return
+
         cost_with_fee = investment * (1 + self.transaction_cost)
 
         if cost_with_fee <= self.balance:
@@ -294,9 +326,13 @@ class ImprovedStockTradingEnv(gym.Env):
             })
 
     def _sell_shares(self, ratio, price, date):
-        """매도 실행 함수"""
+        """매도 실행 함수 - 연속 손실 추적 추가"""
         self.consecutive_holds = 0
         shares_to_sell = self.shares_held * ratio
+
+        # 최소 거래 금액 확인 (신규)
+        if shares_to_sell * price < self.min_trade_amount:
+            return
 
         if shares_to_sell > 0:
             sale_value = shares_to_sell * price * (1 - self.transaction_cost)
@@ -304,12 +340,14 @@ class ImprovedStockTradingEnv(gym.Env):
             self.shares_held -= shares_to_sell
             self.total_trades += 1
 
-            # 수익/손실 추적
+            # 수익/손실 추적 및 연속 손실 카운트 (개선)
             if self.last_trade_price > 0:
                 if price > self.last_trade_price:
                     self.winning_trades += 1
+                    self.consecutive_losses = 0  # 리셋 (신규)
                 else:
                     self.losing_trades += 1
+                    self.consecutive_losses += 1  # 증가 (신규)
 
             self.trade_history.append({
                 'date': date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date),
@@ -324,35 +362,56 @@ class StockAnalyzer:
     """개선된 주식 분석 클래스"""
 
     def __init__(self):
-        self.models_dir = "D:\\StockModelFolder"
         self.model = None
         self.scaler = None
 
-    def load_model(self, model_name: str, user_id: str):
-        """선택된 모델과 스케일러를 로드합니다."""
+    def load_model(self, model_record):
+        """DB record를 기반으로 Azure Blob에서 모델과 스케일러를 로드합니다."""
         try:
-            user_models_path = os.path.join(self.models_dir, user_id)
-            model_path = os.path.join(user_models_path, model_name)
-            scaler_name = model_name.replace('.zip', '_scaler.pkl')
-            scaler_path = os.path.join(user_models_path, scaler_name)
+            # 임시 디렉토리 생성
+            temp_dir = os.path.join('temp', 'model_downloads')
+            os.makedirs(temp_dir, exist_ok=True)
 
-            if os.path.exists(model_path):
-                self.model = PPO.load(model_path)
-                logger.info(f"개선된 PPO 모델 로드 완료: {model_name}")
-            else:
-                logger.error(f"모델 파일을 찾을 수 없습니다: {model_path}")
+            # 로컬에 저장될 파일 경로 정의
+            local_model_path = os.path.join(temp_dir, os.path.basename(model_record.blob_model_path))
+            local_scaler_path = os.path.join(temp_dir, os.path.basename(model_record.blob_scaler_path))
+
+            # Blob Storage에서 파일 다운로드
+            model_downloaded = download_from_blob_storage(model_record.blob_model_path, local_model_path)
+            scaler_downloaded = download_from_blob_storage(model_record.blob_scaler_path, local_scaler_path)
+
+            if not model_downloaded:
+                logger.error(f"모델 다운로드 실패: {model_record.blob_model_path}")
                 return False
 
-            if os.path.exists(scaler_path):
-                self.scaler = joblib.load(scaler_path)
-                logger.info(f"스케일러 로드 완료: {scaler_name}")
+            # 모델 로드
+            self.model = PPO.load(local_model_path)
+            logger.info(f"PPO 모델 로드 완료: {model_record.model_name}")
+
+            # 스케일러 로드
+            if scaler_downloaded and os.path.exists(local_scaler_path):
+                self.scaler = joblib.load(local_scaler_path)
+                logger.info(f"스케일러 로드 완료: {os.path.basename(model_record.blob_scaler_path)}")
             else:
                 self.scaler = None
-                logger.warning(f"스케일러 파일을 찾을 수 없습니다: {scaler_path}")
+                logger.warning(f"스케일러를 찾을 수 없거나 다운로드에 실패했습니다.")
+
+            # 임시 파일 정리
+            try:
+                if os.path.exists(local_model_path): os.remove(local_model_path)
+                if os.path.exists(local_scaler_path): os.remove(local_scaler_path)
+            except OSError as e:
+                logger.warning(f"임시 모델 파일 삭제 실패: {e}")
 
             return True
         except Exception as e:
             logger.error(f"모델 로드 중 오류: {e}")
+            # 실패 시에도 임시 파일 정리 시도
+            try:
+                if 'local_model_path' in locals() and os.path.exists(local_model_path): os.remove(local_model_path)
+                if 'local_scaler_path' in locals() and os.path.exists(local_scaler_path): os.remove(local_scaler_path)
+            except OSError as e_clean:
+                logger.warning(f"오류 후 임시 파일 삭제 실패: {e_clean}")
             return False
 
     def analyze_stock(self, symbol: str, period: str, initial_balance: float, **kwargs) -> Dict:
@@ -391,7 +450,7 @@ class StockAnalyzer:
                       initial_balance: float, symbol: str, period: str, **kwargs) -> Dict:
         """개선된 백테스팅을 실행합니다."""
         try:
-            lookback_window = 20
+            lookback_window = 30  # 변경: 20 -> 30
             env = ImprovedStockTradingEnv(
                 df_scaled,
                 initial_balance=initial_balance,
@@ -404,8 +463,8 @@ class StockAnalyzer:
             portfolio_history = []
             actions_history = []
 
-            # 초기 안정화 기간 (5일간 보유)
-            burn_in_period = 5
+            # 초기 안정화 기간 (변경: 5일 -> 7일)
+            burn_in_period = 7  # 변경: 5 -> 7
             for _ in range(burn_in_period):
                 if not done:
                     portfolio_history.append(env.net_worth)
@@ -439,7 +498,7 @@ class StockAnalyzer:
             # --- 오늘의 추천 (신규 투자자 관점) 로직 ---
             # 마지막 관측 상태를 복사하여 포트폴리오 부분만 수정
             recommendation_obs = obs.copy()
-            
+
             # 포트폴리오 상태를 초기 상태(현금 100%, 주식 0%)로 가정
             # 관측 공간에서 포트폴리오 피쳐의 인덱스: 19부터 9개
             # [현금비율, 주식보유비율, 총자산비율, 마지막액션, 연속보유, 총거래, 드로우다운, 승률, 패률]
@@ -452,13 +511,13 @@ class StockAnalyzer:
                 0.0,  # 총 거래 0
                 0.0,  # 드로우다운 0
                 0.0,  # 승률 0
-                0.0   # 패률 0
+                0.0  # 패률 0
             ])
             recommendation_obs[19:28] = new_investor_portfolio_features
 
             # 신규 투자자 관점에서의 행동 예측
             todays_action_code, _ = self.model.predict(recommendation_obs, deterministic=True)
-            
+
             # 신규 투자자에게 더 친화적인 추천으로 변환
             action_map = {0: '관망', 1: '관망', 2: '관망', 3: '매수', 4: '강력매수'}
             todays_action = action_map.get(todays_action_code.item(), '알 수 없음')
