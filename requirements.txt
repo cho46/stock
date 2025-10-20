@@ -63,3 +63,12 @@ yfinance
 zipp==3.20.2
 gunicorn
 joblib
+stable_baselines3
+Flask-SQLAlchemy
+Flask-Login
+gymnasium
+scikit-learn
+pyodbc
+torch
+tensorboard
+PyMySQL
