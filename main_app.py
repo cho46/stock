@@ -15,7 +15,7 @@ import json
 import logging
 import click
 from datetime import datetime
-import urllib.parse # URL 인코딩을 위해 추가
+from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import or_
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -23,6 +23,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from utils import download_from_blob_storage, delete_blob
+
+# .env 파일에서 환경 변수를 로드합니다.
+load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(
@@ -33,29 +36,21 @@ logger = logging.getLogger(__name__)
 
 # Flask 앱 및 기본 설정
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'your_very_secret_key_change_in_production')
+
+# --- 보안 및 설정 ---
+# 시크릿 키와 데이터베이스 URI를 환경 변수에서 불러옵니다.
+# 로컬 개발 시에는 .env 파일을 통해 이 값들을 설정합니다.
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+
+# 이 값들이 설정되지 않았다면, 앱 실행을 중단시켜 설정을 강제합니다.
+if not app.config['SECRET_KEY'] or not app.config['SQLALCHEMY_DATABASE_URI']:
+    raise ValueError("SECRET_KEY와 DATABASE_URL 환경 변수를 설정해야 합니다.")
+
+logger.info("환경 변수로부터 데이터베이스 설정을 로드했습니다.")
+
+
 app.config['JSON_AS_ASCII'] = False
-
-# 데이터베이스 설정 (Azure SQL - ODBC Driver 17 사용)
-# 1. 아래 변수에 실제 아이디와 비밀번호를 입력하세요.
-DB_USER = "chonhy1"
-DB_PASSWORD = "card2574@!" # 특수문자가 포함된 비밀번호 원본을 여기에 입력
-
-# 2. 비밀번호를 URL 인코딩 처리합니다.
-encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
-
-# 3. 최종 연결 문자열을 생성합니다.
-db_connection_string = f"mssql+pyodbc://{DB_USER}:{encoded_password}@cho1.database.windows.net:1433/my_stock?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes"
-
-# 4. Flask 앱에 최종 연결 문자열을 설정합니다.
-if DB_PASSWORD and DB_PASSWORD != "Your_Password_Here":
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_connection_string
-    logger.info("Azure SQL 데이터베이스에 연결을 시도합니다. (ODBC Driver 17)")
-else:
-    # 비밀번호가 기본값이면 로컬 DB로 연결 (개발용)
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1234@127.0.0.1:3307/my_stock'
-    logger.info("Azure DB 비밀번호가 설정되지 않아 로컬 MySQL 데이터베이스에 연결합니다.")
-
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 3600,
@@ -1163,36 +1158,22 @@ def create_admin():
         click.echo(f'Error creating admin: {e}')
 
 
-# --- 개발/프로덕션 환경 설정 ---
-
-def configure_app_for_environment():
-    """환경별 앱 설정"""
-    if os.environ.get('FLASK_ENV') == 'production':
-        # 프로덕션 설정
-        app.config['DEBUG'] = False
-        app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'production-secret-key')
-        logging.getLogger().setLevel(logging.WARNING)
-    else:
-        # 개발 설정
-        app.config['DEBUG'] = True
-        logging.getLogger().setLevel(logging.DEBUG)
-
-
 # --- 앱 시작점 ---
 
 if __name__ == '__main__':
-    configure_app_for_environment()
     ensure_directories()
-    init_database()
+    # init_database() # 데이터베이스는 앱 컨텍스트 밖에서 직접 초기화하지 않는 것이 좋습니다.
+                      # flask init-db CLI 명령어를 사용하세요.
 
     logger.info("=" * 50)
     logger.info("AI Stock Trading System Starting")
     logger.info("=" * 50)
 
     # 개발 서버 실행
+    # Render와 같은 프로덕션 환경에서는 gunicorn을 사용하므로 이 부분은 로컬 개발 시에만 실행됩니다.
+    # DEBUG 모드는 FLASK_DEBUG 환경 변수로 제어하는 것이 좋습니다.
     app.run(
-        debug=app.config['DEBUG'],
         host='0.0.0.0',
         port=int(os.environ.get('PORT', 5000)),
-        threaded=True
+        debug=(os.environ.get('FLASK_DEBUG', 'False').lower() == 'true')
     )
