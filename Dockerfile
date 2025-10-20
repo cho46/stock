@@ -26,4 +26,4 @@ RUN pip install --upgrade pip setuptools wheel && pip install -r requirements.tx
 COPY . .
 
 # Render가 앱을 실행할 때 사용할 명령어를 지정합니다.
-CMD ["gunicorn", "--bind", "0.0.0.0:${PORT}", "--timeout", "600", "main_app:app"]
+CMD gunicorn --bind 0.0.0.0:${PORT} --timeout 600 main_app:app
