@@ -17,7 +17,7 @@ import click
 from datetime import datetime
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -59,6 +59,19 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 
 #Virtual Machines, BS Series, B1s
 db = SQLAlchemy(app)
+
+# --- DB 연결 테스트 코드 ---
+try:
+    with app.app_context():
+        # db.engine.connect()를 사용하여 실제 연결을 시도하고, 간단한 쿼리를 실행합니다.
+        connection = db.engine.connect()
+        connection.execute(text("SELECT 1"))
+        connection.close()
+        logger.info("✅ 데이터베이스 연결 성공: 애플리케이션이 성공적으로 데이터베이스에 연결되었습니다.")
+except Exception as e:
+    logger.error("❌ 데이터베이스 연결 실패: 시작 시점에 데이터베이스에 연결할 수 없습니다. DATABASE_URL 또는 방화벽 설정을 확인하세요.")
+    logger.error(f"상세 오류: {e}")
+# --- DB 연결 테스트 코드 끝 ---
 
 # Flask-Login 설정
 login_manager = LoginManager()
