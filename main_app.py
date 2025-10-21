@@ -1074,12 +1074,21 @@ def log_user_visit(response):
     """사용자 방문 로그 기록"""
     try:
         if current_user.is_authenticated:
+            # X-Forwarded-For 헤더는 'client, proxy1, proxy2' 형태일 수 있으므로, 가장 첫 번째 IP(실제 클라이언트 IP)만 저장합니다.
+            forwarded_for = request.headers.get('X-Forwarded-For')
+            if forwarded_for:
+                # 쉼표로 구분된 IP 목록 중 첫 번째 IP를 가져와 공백을 제거합니다.
+                ip_address = forwarded_for.split(',')[0].strip()
+            else:
+                # 헤더가 없으면 기존 방식대로 remote_addr을 사용합니다.
+                ip_address = request.remote_addr
+
             if request.endpoint and 'static' not in request.endpoint and request.endpoint != 'log_user_visit':
                 new_log = UserLogs(
                     user_id=current_user.get_id(),
                     address=request.path,
                     user_agent=request.headers.get('User-Agent'),
-                    ip_address=request.headers.get('X-Forwarded-For', request.remote_addr)
+                    ip_address=ip_address
                 )
                 db.session.add(new_log)
                 db.session.commit()
