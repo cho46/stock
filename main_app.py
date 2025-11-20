@@ -24,7 +24,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from utils import download_from_blob_storage, delete_blob
 
-# .env 파일에서 환경 변수를 로드합니다.
+
 load_dotenv()
 
 # 로깅 설정

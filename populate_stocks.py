@@ -5,26 +5,23 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import logging
 import os
-
 import urllib.parse
+from dotenv import load_dotenv
+
+# .env 파일에서 환경 변수 로드
+load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- 설정 --- #
-# 1. 아래 변수에 실제 아이디와 비밀번호를 입력하세요.
-DB_USER = "chonhy1"
-DB_PASSWORD = "card2574@!" # 특수문자가 포함된 비밀번호 원본을 여기에 입력
+# .env 파일에서 DATABASE_URL을 직접 읽어옵니다.
+DB_URI = os.environ.get("DATABASE_URL")
 
-# 2. 비밀번호를 URL 인코딩 처리합니다.
-encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
+# DB_URI가 제대로 로드되었는지 확인
+if not DB_URI:
+    raise ValueError("populate_stocks.py 스크립트를 실행하려면 .env 파일에 DATABASE_URL 변수를 설정해야 합니다.")
 
-# 3. 최종 연결 문자열을 생성합니다.
-DB_URI = f"mssql+pyodbc://{DB_USER}:{encoded_password}@cho1.database.windows.net:1433/my_stock?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes"
-
-# 4. 비밀번호가 기본값인지 확인합니다.
-if DB_PASSWORD == "Your_Password_Here":
-    raise ValueError("populate_stocks.py 스크립트의 DB_PASSWORD 변수에 실제 비밀번호를 설정해야 합니다.")
 
 TABLE_NAME = 'us_stock_info'
 # 로컬 파일 이름
